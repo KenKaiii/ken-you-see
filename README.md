@@ -38,7 +38,7 @@ npm run dev & see-me
 # Visit http://localhost:3334 instead of your normal dev server
 ```
 
-*Windows users: Use `see-me.bat` instead of `see-me`*
+*Global command works from any directory in any shell (bash, zsh, fish, etc.)*
 
 **That's it!** All browser console logs now automatically captured.
 
