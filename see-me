@@ -90,14 +90,26 @@ detect_project_type() {
 find_running_dev_server() {
     echo "🔍 Scanning for running development servers..." >&2
     
-    # Common dev server ports
-    local common_ports=(3000 3001 3002 5173 8000 8080 8888 9000 4000 5000)
+    # Common dev server ports (ordered by priority - dev servers first)
+    local common_ports=(3000 8000 9999 3001 3002 5173 8080 8888 9000 4000 5000)
     local found_ports=()
+    local dev_servers=()
+    local system_services=()
     
     for port in "${common_ports[@]}"; do
         if lsof -i :$port >/dev/null 2>&1; then
             local process_name=$(lsof -i :$port | tail -1 | awk '{print $1}')
             echo "   ✅ Port $port: $process_name" >&2
+            
+            # Categorize processes - prioritize actual dev servers
+            case "$process_name" in
+                node|Node|python*|Python*|ruby|Rails|php|nginx|http-server|webpack*|vite|next*)
+                    dev_servers+=("$port")
+                    ;;
+                *)
+                    system_services+=("$port")
+                    ;;
+            esac
             found_ports+=("$port")
         fi
     done
@@ -108,8 +120,14 @@ find_running_dev_server() {
         return 1
     fi
     
-    # Return the first found port (most likely to be the dev server)
-    echo "${found_ports[0]}"
+    # Prefer actual dev servers over system services
+    if [ ${#dev_servers[@]} -gt 0 ]; then
+        echo "   🎯 Prioritizing dev server on port ${dev_servers[0]}" >&2
+        echo "${dev_servers[0]}"
+    else
+        echo "   ⚠️  Using first available port ${found_ports[0]} (may be system service)" >&2
+        echo "${found_ports[0]}"
+    fi
 }
 
 smart_port_selection() {
@@ -342,6 +360,9 @@ EOF
 
 start_smart_logging() {
     initialize_logging
+    
+    # Give dev server a moment to start if using & backgrounding
+    sleep 2
     
     # Try to find the target port intelligently
     local target_port=$(smart_port_selection)
