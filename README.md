@@ -14,8 +14,22 @@
 ## 🚀 Super Quick Setup
 
 ### Step 1: Install
+
+**macOS/Linux:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/KenKaiii/ken-you-see/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+iwr -useb https://raw.githubusercontent.com/KenKaiii/ken-you-see/main/install.ps1 | iex
+```
+
+**Manual (any platform):**
+```bash
+# Download see-me script
+curl -O https://raw.githubusercontent.com/KenKaiii/ken-you-see/main/see-me
+chmod +x see-me
 ```
 
 ### Step 2: Use It
@@ -23,6 +37,8 @@ curl -fsSL https://raw.githubusercontent.com/KenKaiii/ken-you-see/main/install.s
 npm run dev & see-me
 # Visit http://localhost:3334 instead of your normal dev server
 ```
+
+*Windows users: Use `see-me.bat` instead of `see-me`*
 
 **That's it!** All browser console logs now automatically captured.
 

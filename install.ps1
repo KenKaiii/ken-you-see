@@ -1,38 +1,36 @@
-# DevLogger Windows PowerShell Installer
+# see-me Windows PowerShell Installer
 # Usage: iwr -useb https://raw.githubusercontent.com/KenKaiii/ken-you-see/main/install.ps1 | iex
 
 $RepoUrl = "https://raw.githubusercontent.com/KenKaiii/ken-you-see/main"
 $InstallDir = Get-Location
 
-Write-Host "🚀 Installing DevLogger..." -ForegroundColor Green
+Write-Host "👀 Installing see-me..." -ForegroundColor Green
 
-# Download files
-Write-Host "⬇️  Downloading debug-init..." -ForegroundColor Blue
+# Download see-me script
+Write-Host "⬇️  Downloading see-me..." -ForegroundColor Blue
 try {
-    Invoke-WebRequest -Uri "$RepoUrl/debug-init" -OutFile "debug-init" -UseBasicParsing
-    Invoke-WebRequest -Uri "$RepoUrl/debug-logger" -OutFile "debug-logger" -UseBasicParsing
+    Invoke-WebRequest -Uri "$RepoUrl/see-me" -OutFile "see-me" -UseBasicParsing
 } catch {
     Write-Host "❌ Download failed: $_" -ForegroundColor Red
     exit 1
 }
 
-# Create wrapper batch files for Windows
+# Create Windows batch wrapper
 @"
 @echo off
-bash "%~dp0debug-init" %*
-"@ | Out-File -FilePath "debug-init.bat" -Encoding ASCII
+bash "%~dp0see-me" %*
+"@ | Out-File -FilePath "see-me.bat" -Encoding ASCII
 
-@"
-@echo off
-bash "%~dp0debug-logger" %*
-"@ | Out-File -FilePath "debug-logger.bat" -Encoding ASCII
-
-Write-Host "✅ DevLogger installed successfully!" -ForegroundColor Green
+Write-Host "✅ see-me installed successfully!" -ForegroundColor Green
 Write-Host ""
 Write-Host "🎯 Quick start:" -ForegroundColor Yellow
-Write-Host "   .\debug-init.bat"
-Write-Host "   .\debug-logger.bat --auto-detect"
+Write-Host "   npm run dev"
+Write-Host "   .\see-me.bat"
+Write-Host "   # Visit http://localhost:3334"
 Write-Host ""
-Write-Host "📚 Or use bash directly:" -ForegroundColor Yellow  
-Write-Host "   bash debug-init"
-Write-Host "   bash debug-logger --auto-detect"
+Write-Host "📚 More commands:" -ForegroundColor Yellow
+Write-Host "   .\see-me.bat logs    # View captured logs"
+Write-Host "   .\see-me.bat status  # Check services"
+Write-Host "   .\see-me.bat stop    # Stop services"
+Write-Host ""
+Write-Host "💡 Note: Requires Git Bash, WSL, or similar Unix environment on Windows" -ForegroundColor Cyan
