@@ -369,37 +369,42 @@ EOF
 detect_newly_started_server() {
     echo "🔍 Detecting newly started development server..." >&2
     
+    # Take snapshot of current processes before waiting
+    local before_pids=$(ps -eo pid,comm,args | grep -E "(python|node|ruby|php)" | grep -v grep | awk '{print $1}' | sort)
+    
     # Wait a moment for the server to fully start
-    local max_attempts=10
+    local max_attempts=15
     local attempt=0
     
     while [ $attempt -lt $max_attempts ]; do
         sleep 1
         attempt=$((attempt + 1))
         
-        # Get current processes on common dev ports
-        local common_ports=(3000 3001 3002 5173 8000 8080 8888 9000 9999 4000 5500)
+        # Take snapshot of current processes
+        local after_pids=$(ps -eo pid,comm,args | grep -E "(python|node|ruby|php)" | grep -v grep | awk '{print $1}' | sort)
         
-        for port in "${common_ports[@]}"; do
-            if lsof -i :$port >/dev/null 2>&1; then
-                local process_info=$(lsof -i :$port | tail -1)
-                local process_name=$(echo "$process_info" | awk '{print $1}')
-                local pid=$(echo "$process_info" | awk '{print $2}')
+        # Find new processes (PIDs that appeared)
+        local new_pids=$(comm -13 <(echo "$before_pids") <(echo "$after_pids"))
+        
+        if [ -n "$new_pids" ]; then
+            # Check each new process for listening ports
+            for pid in $new_pids; do
+                # Get all ports this process is listening on
+                local listening_ports=$(lsof -Pan -p "$pid" -i 2>/dev/null | grep LISTEN | awk -F: '{print $2}' | awk '{print $1}' | sort -u)
                 
-                # Check if this is a dev server process
-                case "$process_name" in
-                    node|Node|python*|Python*|ruby|Rails|php|nginx|http-server|webpack*|vite|next*|live-server)
-                        # Check if this process is recent (started within last 30 seconds)
-                        local process_start=$(ps -o lstart= -p "$pid" 2>/dev/null)
-                        if [ -n "$process_start" ]; then
-                            echo "   ✅ Found $process_name on port $port (PID: $pid)" >&2
+                if [ -n "$listening_ports" ]; then
+                    for port in $listening_ports; do
+                        # Verify the port is actually bound and accessible
+                        if lsof -i :$port >/dev/null 2>&1; then
+                            local process_name=$(ps -p "$pid" -o comm= 2>/dev/null)
+                            echo "   ✅ Found new $process_name server on port $port (PID: $pid)" >&2
                             echo "$port"
                             return 0
                         fi
-                        ;;
-                esac
-            fi
-        done
+                    done
+                fi
+            done
+        fi
         
         echo "   ⏳ Waiting for dev server to start... (attempt $attempt/$max_attempts)" >&2
     done
