@@ -34,7 +34,7 @@ detect_project_type() {
     local project_type="unknown"
     local expected_port=""
     
-    echo "🔍 Auto-detecting project type..."
+    echo "🔍 Auto-detecting project type..." >&2
     
     # Check for package.json (Node.js projects)
     if [ -f "package.json" ]; then
@@ -83,7 +83,7 @@ detect_project_type() {
         expected_port="8000"
     fi
     
-    echo "📦 Detected: $project_type (expected port: $expected_port)"
+    echo "📦 Detected: $project_type (expected port: $expected_port)" >&2
     echo "$project_type|$expected_port"
 }
 
