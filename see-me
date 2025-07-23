@@ -411,47 +411,68 @@ EOF
 detect_newly_started_server() {
     echo "🔍 Detecting newly started development server..." >&2
     
-    # Take snapshot of current processes before waiting
-    local before_pids=$(ps -eo pid,comm,args | grep -E "(python|node|ruby|php)" | grep -v grep | awk '{print $1}' | sort)
+    # Wait a moment for backgrounded command to start
+    sleep 2
     
-    # Wait a moment for the server to fully start
-    local max_attempts=15
+    # Look for recent dev server processes (started within last 30 seconds)
+    local max_attempts=10
     local attempt=0
     
     while [ $attempt -lt $max_attempts ]; do
         sleep 1
         attempt=$((attempt + 1))
         
-        # Take snapshot of current processes
-        local after_pids=$(ps -eo pid,comm,args | grep -E "(python|node|ruby|php)" | grep -v grep | awk '{print $1}' | sort)
+        # Find all python/node processes and check their start time
+        local current_time=$(date +%s)
         
-        # Find new processes (PIDs that appeared)
-        local new_pids=$(comm -13 <(echo "$before_pids") <(echo "$after_pids"))
-        
-        if [ -n "$new_pids" ]; then
-            # Check each new process for listening ports
-            for pid in $new_pids; do
-                # Get all ports this process is listening on
+        # Get all dev server processes with their PIDs
+        ps -eo pid,lstart,comm,args | grep -E "(python.*server|node.*server|python.*http|ruby.*server|php.*server)" | grep -v grep | while read line; do
+            local pid=$(echo "$line" | awk '{print $1}')
+            local process_start_str=$(echo "$line" | awk '{print $2, $3, $4, $5, $6}')
+            
+            # Convert process start time to seconds (rough estimate)
+            local process_start_time=$(date -j -f "%a %b %d %H:%M:%S %Y" "$process_start_str" +%s 2>/dev/null || echo 0)
+            local age=$((current_time - process_start_time))
+            
+            # If process is less than 30 seconds old, check for listening ports
+            if [ $age -lt 30 ]; then
                 local listening_ports=$(lsof -Pan -p "$pid" -i 2>/dev/null | grep LISTEN | awk -F: '{print $2}' | awk '{print $1}' | sort -u)
                 
                 if [ -n "$listening_ports" ]; then
                     for port in $listening_ports; do
-                        # Verify the port is actually bound and accessible
                         if lsof -i :$port >/dev/null 2>&1; then
                             local process_name=$(ps -p "$pid" -o comm= 2>/dev/null)
-                            echo "   ✅ Found new $process_name server on port $port (PID: $pid)" >&2
+                            echo "   ✅ Found recent $process_name server on port $port (PID: $pid)" >&2
                             echo "$port"
                             return 0
                         fi
                     done
                 fi
-            done
+            fi
+        done
+        
+        # If no recent process found, try a simpler approach - find any python/node with http.server or similar
+        local simple_match=$(ps -eo pid,args | grep -E "(python.*http\.server|python.*-m.*http|node.*server)" | grep -v grep | head -1)
+        if [ -n "$simple_match" ]; then
+            local pid=$(echo "$simple_match" | awk '{print $1}')
+            local listening_ports=$(lsof -Pan -p "$pid" -i 2>/dev/null | grep LISTEN | awk -F: '{print $2}' | awk '{print $1}' | sort -u)
+            
+            if [ -n "$listening_ports" ]; then
+                for port in $listening_ports; do
+                    if lsof -i :$port >/dev/null 2>&1; then
+                        local process_name=$(ps -p "$pid" -o comm= 2>/dev/null)
+                        echo "   ✅ Found $process_name server on port $port (PID: $pid)" >&2
+                        echo "$port"
+                        return 0
+                    fi
+                done
+            fi
         fi
         
         echo "   ⏳ Waiting for dev server to start... (attempt $attempt/$max_attempts)" >&2
     done
     
-    echo "   ❌ No new dev server detected within timeout" >&2
+    echo "   ❌ No dev server detected within timeout" >&2
     return 1
 }
 
