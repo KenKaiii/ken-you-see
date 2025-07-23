@@ -88,7 +88,7 @@ detect_project_type() {
 }
 
 find_running_dev_server() {
-    echo "🔍 Scanning for running development servers..."
+    echo "🔍 Scanning for running development servers..." >&2
     
     # Common dev server ports
     local common_ports=(3000 3001 3002 5173 8000 8080 8888 9000 4000 5000)
@@ -97,14 +97,14 @@ find_running_dev_server() {
     for port in "${common_ports[@]}"; do
         if lsof -i :$port >/dev/null 2>&1; then
             local process_name=$(lsof -i :$port | tail -1 | awk '{print $1}')
-            echo "   ✅ Port $port: $process_name"
+            echo "   ✅ Port $port: $process_name" >&2
             found_ports+=("$port")
         fi
     done
     
     if [ ${#found_ports[@]} -eq 0 ]; then
-        echo "   ❌ No development servers found"
-        echo "   💡 Start your dev server first: npm run dev (or equivalent)"
+        echo "   ❌ No development servers found" >&2
+        echo "   💡 Start your dev server first: npm run dev (or equivalent)" >&2
         return 1
     fi
     
@@ -119,17 +119,17 @@ smart_port_selection() {
     
     # First, check if the expected port is running
     if lsof -i :$expected_port >/dev/null 2>&1; then
-        echo "🎯 Found $project_type server on expected port $expected_port"
+        echo "🎯 Found $project_type server on expected port $expected_port" >&2
         echo "$expected_port"
         return 0
     fi
     
     # If not, scan for any running dev server
-    echo "⚠️  Expected port $expected_port not in use, scanning for alternatives..."
+    echo "⚠️  Expected port $expected_port not in use, scanning for alternatives..." >&2
     local found_port=$(find_running_dev_server)
     
     if [ $? -eq 0 ]; then
-        echo "🎯 Using port $found_port"
+        echo "🎯 Using port $found_port" >&2
         echo "$found_port"
         return 0
     else
@@ -372,10 +372,25 @@ start_smart_logging() {
     echo ""
     echo "🎉 see-me is active!"
     echo "🌐 Visit: http://localhost:3334"
-    echo "📋 View logs: see-me logs"
-    echo "🛑 Stop: see-me stop"
+    echo "📋 View logs: see-me logs (in another terminal)"
+    echo "🛑 Stop: see-me stop (or Ctrl+C)"
     echo ""
     echo "💡 All browser console output is now automatically captured for agents!"
+    echo ""
+    echo "🔍 Monitoring... (Press Ctrl+C to stop)"
+    
+    # Keep running and show live log updates
+    trap 'echo ""; echo "🛑 Stopping see-me..."; pkill -f "log-server.js" 2>/dev/null || true; pkill -f "proxy.js" 2>/dev/null || true; exit 0' INT
+    
+    # Follow logs if they exist, otherwise just wait
+    if [ -f ".devlogger/browser.log" ]; then
+        tail -f .devlogger/browser.log
+    else
+        # Just wait until interrupted
+        while true; do
+            sleep 1
+        done
+    fi
 }
 
 show_logs() {
