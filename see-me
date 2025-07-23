@@ -430,7 +430,7 @@ detect_newly_started_server() {
         # Skip the complex time-based detection for now, use simpler approach
         
         # If no recent process found, try a simpler approach - find any python/node with http.server or similar
-        local simple_match=$(ps -eo pid,args | grep -E "(python.*http\.server|python.*-m.*http|node.*server)" | grep -v grep | head -1)
+        local simple_match=$(ps -eo pid,args | grep -E "(python.*http\.server|python.*-m.*http\.server)" | grep -v grep | head -1)
         if [ -n "$simple_match" ]; then
             local pid=$(echo "$simple_match" | awk '{print $1}')
             local listening_ports=$(lsof -Pan -p "$pid" -i 2>/dev/null | grep LISTEN | awk -F: '{print $2}' | awk '{print $1}' | sort -u)
