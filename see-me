@@ -188,15 +188,9 @@ wait_for_dev_server() {
 initialize_logging() {
     if [ ! -d ".devlogger" ]; then
         echo "🔧 First time setup - initializing browser logging..."
-        
         mkdir -p .devlogger
-    fi
-    
-    # Always start with fresh logs for new development session
-    echo "🗑️  Clearing previous browser logs for fresh session..."
-    > .devlogger/browser.log
         
-        # Create console wrapper (same as before)
+        # Create console wrapper
         cat > .devlogger/console-wrapper.js << 'EOF'
 // DevLogger Console Wrapper - Captures browser console output
 (function() {
@@ -408,6 +402,10 @@ EOF
 
         echo "✅ Browser logging initialized!"
     fi
+    
+    # Always start with fresh logs for new development session
+    echo "🗑️  Clearing previous browser logs for fresh session..."
+    > .devlogger/browser.log
 }
 
 detect_newly_started_server() {
