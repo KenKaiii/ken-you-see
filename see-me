@@ -221,9 +221,28 @@ initialize_logging() {
         const message = args.map(arg => {
             if (typeof arg === 'object') {
                 if (arg === null) return 'null';
-                if (arg instanceof Error) return `${arg.name}: ${arg.message}`;
+                if (arg instanceof Error) {
+                    return `${arg.name}: ${arg.message}${arg.stack ? '\n' + arg.stack : ''}`;
+                }
                 try {
-                    return JSON.stringify(arg, null, 2);
+                    const jsonStr = JSON.stringify(arg, null, 2);
+                    // If JSON.stringify returns {}, try to extract properties manually
+                    if (jsonStr === '{}' && arg.constructor && arg.constructor.name) {
+                        const props = [];
+                        for (let key in arg) {
+                            try {
+                                props.push(`${key}: ${arg[key]}`);
+                            } catch (e) {}
+                        }
+                        // Also try common Error properties
+                        if (arg.name) props.push(`name: "${arg.name}"`);
+                        if (arg.message) props.push(`message: "${arg.message}"`);
+                        if (props.length > 0) {
+                            return `{${props.join(', ')}}`;
+                        }
+                        return `[${arg.constructor.name} object]`;
+                    }
+                    return jsonStr;
                 } catch (e) {
                     return `[Object: ${Object.prototype.toString.call(arg)}]`;
                 }
