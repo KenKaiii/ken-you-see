@@ -11,20 +11,28 @@ show_help() {
 see-me - Smart Browser Console Logging
 
 USAGE:
-    npm run dev & see-me    # Auto-detect everything and start logging
-    see-me                  # Auto-detect and start (if dev server already running)
-    see-me logs             # View captured browser logs
+    see-me [PORT]           # Start logging for specific port (recommended)
+    see-me                  # Auto-detect running dev server (if only one)
+    see-me logs             # View captured browser logs  
     see-me stop             # Stop logging services
     see-me status           # Show current status
 
-SMART FEATURES:
-    ✅ Auto-detects project type (React, Next.js, Django, Vite, etc.)
-    ✅ Auto-finds running dev server port
-    ✅ Auto-starts logging services
-    ✅ Just visit the proxy URL and logs are captured automatically
+SAFE WORKFLOWS:
+    # Method 1: Specify port explicitly (recommended)
+    npm run dev             # Note the port from output (e.g., 8080)
+    see-me 8080             # Connect to that specific port
+    
+    # Method 2: Sequential start
+    npm run dev             # Start your dev server first
+    see-me                  # Auto-detect (only if exactly one dev server running)
 
-EXAMPLE WORKFLOW:
-    npm run dev & see-me    # One command starts everything
+FEATURES:
+    ✅ Safe port detection - only connects to intended server
+    ✅ Auto-detects project type (React, Next.js, Django, Vite, etc.)
+    ✅ Browser console log capture with proxy injection
+    ✅ Agent-readable log files
+
+EXAMPLE:
     # Visit http://localhost:3334 instead of your normal dev server URL
     # All console logs automatically captured for agents to read
 EOF
@@ -87,70 +95,71 @@ detect_project_type() {
     echo "$project_type|$expected_port"
 }
 
-find_running_dev_server() {
-    echo "🔍 Scanning for running development servers..." >&2
+find_safe_dev_servers() {
+    echo "🔍 Scanning for development servers..." >&2
     
-    # Common dev server ports (ordered by priority - dev servers first)
-    local common_ports=(3000 8000 9999 3001 3002 5173 8080 8888 9000 4000 5000)
-    local found_ports=()
+    # Common dev server ports (ordered by priority)
+    local common_ports=(3000 8000 9999 3001 3002 5173 8080 8888 9000 4000 5500)
     local dev_servers=()
-    local system_services=()
     
     for port in "${common_ports[@]}"; do
         if lsof -i :$port >/dev/null 2>&1; then
             local process_name=$(lsof -i :$port | tail -1 | awk '{print $1}')
-            echo "   ✅ Port $port: $process_name" >&2
             
-            # Categorize processes - prioritize actual dev servers
+            # Only include processes that are clearly dev servers
             case "$process_name" in
-                node|Node|python*|Python*|ruby|Rails|php|nginx|http-server|webpack*|vite|next*)
+                node|Node|python*|Python*|ruby|Rails|php|nginx|http-server|webpack*|vite|next*|live-server)
+                    echo "   ✅ Port $port: $process_name (dev server)" >&2
                     dev_servers+=("$port")
                     ;;
                 *)
-                    system_services+=("$port")
+                    echo "   ⚪ Port $port: $process_name (system service - skipped)" >&2
                     ;;
             esac
-            found_ports+=("$port")
         fi
     done
     
-    if [ ${#found_ports[@]} -eq 0 ]; then
-        echo "   ❌ No development servers found" >&2
-        echo "   💡 Start your dev server first: npm run dev (or equivalent)" >&2
-        return 1
-    fi
-    
-    # Prefer actual dev servers over system services
-    if [ ${#dev_servers[@]} -gt 0 ]; then
-        echo "   🎯 Prioritizing dev server on port ${dev_servers[0]}" >&2
-        echo "${dev_servers[0]}"
-    else
-        echo "   ⚠️  Using first available port ${found_ports[0]} (may be system service)" >&2
-        echo "${found_ports[0]}"
-    fi
+    echo "${#dev_servers[@]} ${dev_servers[@]}"
 }
 
-smart_port_selection() {
-    local project_info=$(detect_project_type)
-    local project_type=$(echo "$project_info" | cut -d'|' -f1)
-    local expected_port=$(echo "$project_info" | cut -d'|' -f2)
+safe_port_selection() {
+    local explicit_port="$1"
     
-    # First, check if the expected port is running
-    if lsof -i :$expected_port >/dev/null 2>&1; then
-        echo "🎯 Found $project_type server on expected port $expected_port" >&2
-        echo "$expected_port"
-        return 0
+    # If port explicitly specified, use it (but verify it exists)
+    if [ -n "$explicit_port" ]; then
+        if lsof -i :$explicit_port >/dev/null 2>&1; then
+            local process_name=$(lsof -i :$explicit_port | tail -1 | awk '{print $1}')
+            echo "🎯 Using explicitly specified port $explicit_port ($process_name)" >&2
+            echo "$explicit_port"
+            return 0
+        else
+            echo "❌ Port $explicit_port is not in use" >&2
+            echo "   💡 Make sure your dev server is running on this port" >&2
+            return 1
+        fi
     fi
     
-    # If not, scan for any running dev server
-    echo "⚠️  Expected port $expected_port not in use, scanning for alternatives..." >&2
-    local found_port=$(find_running_dev_server)
+    # Auto-detection: only proceed if exactly one dev server is running
+    local servers_info=$(find_safe_dev_servers)
+    local server_count=$(echo "$servers_info" | awk '{print $1}')
+    local server_ports=($(echo "$servers_info" | awk '{for(i=2;i<=NF;i++) print $i}'))
     
-    if [ $? -eq 0 ]; then
-        echo "🎯 Using port $found_port" >&2
-        echo "$found_port"
+    if [ "$server_count" -eq 0 ]; then
+        echo "❌ No development servers detected" >&2
+        echo "   💡 Start your dev server first, then:" >&2
+        echo "   💡 Use: see-me [PORT] to specify the port explicitly" >&2
+        return 1
+    elif [ "$server_count" -eq 1 ]; then
+        echo "🎯 Found exactly one dev server on port ${server_ports[0]}" >&2
+        echo "${server_ports[0]}"
         return 0
     else
+        echo "⚠️  Multiple dev servers detected: ${server_ports[@]}" >&2
+        echo "   💡 Please specify which port to use:" >&2
+        for port in "${server_ports[@]}"; do
+            local process_name=$(lsof -i :$port | tail -1 | awk '{print $1}')
+            echo "   💡 see-me $port    # Connect to $process_name on port $port" >&2
+        done
         return 1
     fi
 }
@@ -359,21 +368,18 @@ EOF
 }
 
 start_smart_logging() {
+    local explicit_port="$1"
     initialize_logging
     
-    # Give dev server a moment to start if using & backgrounding
-    sleep 2
-    
-    # Try to find the target port intelligently
-    local target_port=$(smart_port_selection)
+    # Try to find the target port safely
+    local target_port=$(safe_port_selection "$explicit_port")
     
     if [ $? -ne 0 ]; then
-        echo "❌ Could not find a running development server"
         echo ""
-        echo "💡 Try this workflow:"
-        echo "   1. Start your dev server: npm run dev (or python manage.py runserver, etc.)"
-        echo "   2. Then run: see-me"
-        echo "   3. Or use one command: npm run dev & see-me"
+        echo "💡 Safe workflow examples:"
+        echo "   see-me 3000      # Connect to port 3000 specifically"
+        echo "   see-me 8080      # Connect to port 8080 specifically"
+        echo "   see-me           # Auto-detect (only if exactly one dev server)"
         return 1
     fi
     
@@ -489,9 +495,14 @@ case "${1:-start}" in
     help|--help|-h)
         show_help
         ;;
+    [0-9]*)
+        # Port number specified
+        start_smart_logging "$1"
+        ;;
     *)
         echo "❌ Unknown command: $1"
         echo "   Use 'see-me help' for usage"
+        echo "   Or specify a port: see-me [PORT]"
         exit 1
         ;;
 esac
