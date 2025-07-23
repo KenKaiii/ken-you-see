@@ -25,21 +25,43 @@ else
     if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
         echo "🔧 Adding $INSTALL_DIR to PATH..."
         
+        PATH_UPDATED=false
+        
         # Add to multiple shell profiles for compatibility
         for profile in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
             if [ -f "$profile" ] || [ "$profile" = "$HOME/.profile" ]; then
-                # Check if PATH export already exists
-                if ! grep -q "export PATH.*$INSTALL_DIR" "$profile" 2>/dev/null; then
+                # Check if PATH export already exists (look for uncommented lines)
+                if ! grep -q "^[[:space:]]*export PATH.*\.local/bin" "$profile" 2>/dev/null; then
                     echo "" >> "$profile"
                     echo "# Added by see-me installer" >> "$profile"
                     echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$profile"
                     echo "✅ Updated $(basename "$profile")"
+                    PATH_UPDATED=true
                 fi
             fi
         done
         
-        # Update current session PATH
+        # Update current session PATH immediately
         export PATH="$HOME/.local/bin:$PATH"
+        
+        if [ "$PATH_UPDATED" = true ]; then
+            echo ""
+            echo "🔄 Reloading shell configuration..."
+            # Try to reload the current shell's config
+            if [ -n "$ZSH_VERSION" ]; then
+                # Running in zsh
+                if [ -f "$HOME/.zshrc" ]; then
+                    source "$HOME/.zshrc" 2>/dev/null || true
+                fi
+            elif [ -n "$BASH_VERSION" ]; then
+                # Running in bash
+                if [ -f "$HOME/.bashrc" ]; then
+                    source "$HOME/.bashrc" 2>/dev/null || true
+                elif [ -f "$HOME/.bash_profile" ]; then
+                    source "$HOME/.bash_profile" 2>/dev/null || true
+                fi
+            fi
+        fi
     fi
 fi
 
@@ -61,6 +83,18 @@ fi
 chmod +x "$INSTALL_DIR/see-me"
 
 echo "✅ see-me installed successfully!"
+
+# Test if see-me command is immediately available
+if command -v see-me >/dev/null 2>&1; then
+    echo "🎉 see-me command is ready to use!"
+else
+    echo "⚠️  Command not immediately available - may need shell restart"
+    echo ""
+    echo "🔧 Quick fix options:"
+    echo "   Option 1: export PATH=\"\$HOME/.local/bin:\$PATH\""
+    echo "   Option 2: source ~/.\$(basename \"\$SHELL\")rc"
+    echo "   Option 3: restart your terminal"
+fi
 echo ""
 echo "🎯 Quick start (from any directory):"
 echo "   npm run dev & see-me"
@@ -71,6 +105,5 @@ echo "   see-me logs    # View captured logs"
 echo "   see-me status  # Check services"
 echo "   see-me stop    # Stop services"
 echo ""
-if [[ "$EUID" -ne 0 ]] && [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
-    echo "💡 Restart your terminal or run: source ~/.$(basename "$SHELL")rc"
-fi
+echo "🔍 Test installation:"
+echo "   see-me --help"
