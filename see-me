@@ -401,6 +401,8 @@ server.listen(PROXY_PORT, () => {
 EOF
 
         echo "✅ Browser logging initialized!"
+    else
+        echo "🔧 Using existing browser logging setup..."
     fi
     
     # Always start with fresh logs for new development session
