@@ -427,31 +427,7 @@ detect_newly_started_server() {
         # Find all python/node processes and check their start time
         local current_time=$(date +%s)
         
-        # Get all dev server processes with their PIDs
-        ps -eo pid,lstart,comm,args | grep -E "(python.*server|node.*server|python.*http|ruby.*server|php.*server)" | grep -v grep | while read line; do
-            local pid=$(echo "$line" | awk '{print $1}')
-            local process_start_str=$(echo "$line" | awk '{print $2, $3, $4, $5, $6}')
-            
-            # Convert process start time to seconds (rough estimate)
-            local process_start_time=$(date -j -f "%a %b %d %H:%M:%S %Y" "$process_start_str" +%s 2>/dev/null || echo 0)
-            local age=$((current_time - process_start_time))
-            
-            # If process is less than 30 seconds old, check for listening ports
-            if [ $age -lt 30 ]; then
-                local listening_ports=$(lsof -Pan -p "$pid" -i 2>/dev/null | grep LISTEN | awk -F: '{print $2}' | awk '{print $1}' | sort -u)
-                
-                if [ -n "$listening_ports" ]; then
-                    for port in $listening_ports; do
-                        if lsof -i :$port >/dev/null 2>&1; then
-                            local process_name=$(ps -p "$pid" -o comm= 2>/dev/null)
-                            echo "   ✅ Found recent $process_name server on port $port (PID: $pid)" >&2
-                            echo "$port"
-                            return 0
-                        fi
-                    done
-                fi
-            fi
-        done
+        # Skip the complex time-based detection for now, use simpler approach
         
         # If no recent process found, try a simpler approach - find any python/node with http.server or similar
         local simple_match=$(ps -eo pid,args | grep -E "(python.*http\.server|python.*-m.*http|node.*server)" | grep -v grep | head -1)
