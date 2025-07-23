@@ -7,50 +7,41 @@
     const LOG_SERVER_URL = 'http://localhost:3333/save-log';
     const CLEAR_LOG_URL = 'http://localhost:3333/clear-logs';
     
-    // Always clear logs on page load (simple approach)
+    // Start new session - get session timestamp from server
+    let currentSessionId = null;
     fetch(CLEAR_LOG_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clear: true })
-    }).catch(() => {}); // Ignore errors during clearing
-    
-    function hashMessage(msg) {
-        try {
-            return btoa(JSON.stringify(msg)).slice(0, 10);
-        } catch (e) {
-            return JSON.stringify(msg).slice(0, 10);
-        }
-    }
+    }).then(response => response.json())
+      .then(data => {
+          currentSessionId = data.sessionStart;
+          console.log('🔄 New session started:', currentSessionId);
+      }).catch(() => {
+          currentSessionId = Date.now(); // Fallback
+      });
     
     function addLog(level, args) {
         const message = args.map(arg => 
             typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
         ).join(' ');
         
-        const hash = hashMessage(message);
         const timestamp = new Date().toISOString();
         
-        // Check for duplicates in current session only
-        const existing = logs.find(log => log.hash === hash);
-        if (existing) {
-            existing.count++;
-            existing.message = `${message} (seen ${existing.count} times)`;
-        } else {
-            logs.push({ hash, message, level, timestamp, count: 1 });
-        }
-        
-        // Send to server
-        const logEntry = existing || logs[logs.length - 1];
+        // Send directly to server - no client-side deduplication
         fetch(LOG_SERVER_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                timestamp: logEntry.timestamp,
+                timestamp: timestamp,
                 level: level.toUpperCase(),
-                message: logEntry.message
+                message: message
             })
         }).catch(() => {
-            localStorage.setItem('devlogger-logs', JSON.stringify(logs));
+            // Fallback: store in localStorage if server unavailable
+            const fallbackLogs = JSON.parse(localStorage.getItem('devlogger-logs') || '[]');
+            fallbackLogs.push({ timestamp, level, message });
+            localStorage.setItem('devlogger-logs', JSON.stringify(fallbackLogs));
         });
     }
     

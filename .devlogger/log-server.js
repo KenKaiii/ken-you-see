@@ -5,7 +5,7 @@ const path = require('path');
 const PORT = 3333;
 const LOG_FILE = path.join(__dirname, 'browser.log');
 
-let currentSession = null;
+let sessionStartTime = Date.now();
 
 const server = http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -25,14 +25,14 @@ const server = http.createServer((req, res) => {
             try {
                 const data = JSON.parse(body);
                 
-                // Simple approach: always clear logs on request
+                // New session started - update timestamp
                 if (data.clear === true) {
-                    fs.writeFileSync(LOG_FILE, ''); // Clear the log file
-                    console.log('🔄 Logs cleared on page load');
+                    sessionStartTime = Date.now();
+                    console.log('🔄 New session started - timestamp updated');
                 }
                 
                 res.writeHead(200, {'Content-Type': 'application/json'});
-                res.end(JSON.stringify({success: true, cleared: true}));
+                res.end(JSON.stringify({success: true, sessionStart: sessionStartTime}));
             } catch (err) {
                 res.writeHead(400);
                 res.end('Invalid JSON');
@@ -44,7 +44,7 @@ const server = http.createServer((req, res) => {
         req.on('end', () => {
             try {
                 const log = JSON.parse(body);
-                const logLine = `[${log.timestamp}] BROWSER ${log.level}: ${log.message}\n`;
+                const logLine = `SESSION:${sessionStartTime}|[${log.timestamp}] BROWSER ${log.level}: ${log.message}\n`;
                 fs.appendFileSync(LOG_FILE, logLine);
                 res.writeHead(200, {'Content-Type': 'application/json'});
                 res.end(JSON.stringify({success: true}));
@@ -53,6 +53,9 @@ const server = http.createServer((req, res) => {
                 res.end('Invalid JSON');
             }
         });
+    } else if (req.method === 'GET' && req.url === '/session') {
+        res.writeHead(200, {'Content-Type': 'text/plain'});
+        res.end(sessionStartTime.toString());
     } else {
         res.writeHead(404);
         res.end('Not found');
