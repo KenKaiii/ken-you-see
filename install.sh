@@ -82,7 +82,7 @@ fi
 # Make executable
 chmod +x "$INSTALL_DIR/see-me"
 
-echo "✅ see-me v2.1.0 installed successfully!"
+echo "✅ see-me v2.2.0 installed successfully!"
 
 # Test if see-me command is immediately available
 if command -v see-me >/dev/null 2>&1; then
