@@ -24,17 +24,15 @@ const server = http.createServer((req, res) => {
         req.on('end', () => {
             try {
                 const data = JSON.parse(body);
-                const newSessionId = data.sessionId;
                 
-                // Only clear if this is a new session (page refresh)
-                if (currentSession !== newSessionId) {
-                    currentSession = newSessionId;
+                // Simple approach: always clear logs on request
+                if (data.clear === true) {
                     fs.writeFileSync(LOG_FILE, ''); // Clear the log file
-                    console.log(`🔄 Page refresh detected - cleared logs (session: ${newSessionId.slice(0, 8)}...)`);
+                    console.log('🔄 Logs cleared on page load');
                 }
                 
                 res.writeHead(200, {'Content-Type': 'application/json'});
-                res.end(JSON.stringify({success: true, cleared: currentSession === newSessionId}));
+                res.end(JSON.stringify({success: true, cleared: true}));
             } catch (err) {
                 res.writeHead(400);
                 res.end('Invalid JSON');

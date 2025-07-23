@@ -3,12 +3,13 @@
 # see-me - Intelligent Browser Console Logging
 # Auto-detects project type and running dev servers
 # Usage: npm run dev & see-me
+# Version: 2.1.0
 
 set -e
 
 show_help() {
     cat << EOF
-see-me - Smart Browser Console Logging
+see-me - Smart Browser Console Logging (v2.1.0)
 
 USAGE:
     npm run dev & see-me    # One command - auto-detects new server port
@@ -16,6 +17,7 @@ USAGE:
     see-me logs             # View captured browser logs  
     see-me stop             # Stop logging services
     see-me status           # Show current status
+    see-me version          # Show version information
 
 WORKFLOWS:
     # Method 1: Single command (recommended)
@@ -201,14 +203,11 @@ initialize_logging() {
     const LOG_SERVER_URL = 'http://localhost:3333/save-log';
     const CLEAR_LOG_URL = 'http://localhost:3333/clear-logs';
     
-    // Generate session ID to detect page refreshes
-    const sessionId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-    
-    // Clear logs on page load (fresh start for each refresh)
+    // Always clear logs on page load (simple approach)
     fetch(CLEAR_LOG_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: sessionId })
+        body: JSON.stringify({ clear: true })
     }).catch(() => {}); // Ignore errors during clearing
     
     function hashMessage(msg) {
@@ -236,13 +235,12 @@ initialize_logging() {
             logs.push({ hash, message, level, timestamp, count: 1 });
         }
         
-        // Send to server with session ID
+        // Send to server
         const logEntry = existing || logs[logs.length - 1];
         fetch(LOG_SERVER_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                sessionId: sessionId,
                 timestamp: logEntry.timestamp,
                 level: level.toUpperCase(),
                 message: logEntry.message
@@ -301,17 +299,15 @@ const server = http.createServer((req, res) => {
         req.on('end', () => {
             try {
                 const data = JSON.parse(body);
-                const newSessionId = data.sessionId;
                 
-                // Only clear if this is a new session (page refresh)
-                if (currentSession !== newSessionId) {
-                    currentSession = newSessionId;
+                // Simple approach: always clear logs on request
+                if (data.clear === true) {
                     fs.writeFileSync(LOG_FILE, ''); // Clear the log file
-                    console.log(`🔄 Page refresh detected - cleared logs (session: ${newSessionId.slice(0, 8)}...)`);
+                    console.log('🔄 Logs cleared on page load');
                 }
                 
                 res.writeHead(200, {'Content-Type': 'application/json'});
-                res.end(JSON.stringify({success: true, cleared: currentSession === newSessionId}));
+                res.end(JSON.stringify({success: true, cleared: true}));
             } catch (err) {
                 res.writeHead(400);
                 res.end('Invalid JSON');
@@ -416,8 +412,8 @@ detect_newly_started_server() {
     # Wait a moment for backgrounded command to start
     sleep 2
     
-    # Simple approach - find any python/node with http.server or similar
-    local simple_match=$(ps -eo pid,args | grep -E "(python.*http\.server|python.*-m.*http\.server)" | grep -v grep | head -1)
+    # Simple approach - find any python with http.server or similar
+    local simple_match=$(ps -eo pid,args | grep -E "(Python.*-m.*http\.server|python.*-m.*http\.server|python.*http\.server)" | grep -v grep | head -1)
     if [ -n "$simple_match" ]; then
         local pid=$(echo "$simple_match" | awk '{print $1}')
         local listening_ports=$(lsof -Pan -p "$pid" -i 2>/dev/null | grep LISTEN | awk -F: '{print $2}' | awk '{print $1}' | sort -u)
@@ -559,6 +555,11 @@ stop_services() {
     echo "✅ Services stopped"
 }
 
+show_version() {
+    echo "see-me version 2.1.0"
+    echo "Smart Browser Console Logging for Coding Agents"
+}
+
 # Main execution
 case "${1:-start}" in
     start|"")
@@ -572,6 +573,9 @@ case "${1:-start}" in
         ;;
     stop)
         stop_services
+        ;;
+    version|--version|-v)
+        show_version
         ;;
     help|--help|-h)
         show_help

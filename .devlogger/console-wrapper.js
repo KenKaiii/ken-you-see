@@ -7,14 +7,11 @@
     const LOG_SERVER_URL = 'http://localhost:3333/save-log';
     const CLEAR_LOG_URL = 'http://localhost:3333/clear-logs';
     
-    // Generate session ID to detect page refreshes
-    const sessionId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-    
-    // Clear logs on page load (fresh start for each refresh)
+    // Always clear logs on page load (simple approach)
     fetch(CLEAR_LOG_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: sessionId })
+        body: JSON.stringify({ clear: true })
     }).catch(() => {}); // Ignore errors during clearing
     
     function hashMessage(msg) {
@@ -42,13 +39,12 @@
             logs.push({ hash, message, level, timestamp, count: 1 });
         }
         
-        // Send to server with session ID
+        // Send to server
         const logEntry = existing || logs[logs.length - 1];
         fetch(LOG_SERVER_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                sessionId: sessionId,
                 timestamp: logEntry.timestamp,
                 level: level.toUpperCase(),
                 message: logEntry.message
