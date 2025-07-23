@@ -1,0 +1,563 @@
+#!/bin/bash
+
+# debug-logger: Automated instrumentation for existing projects
+# Usage: debug-logger [--auto-detect|--browser|--cli|--status]
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+DEBUG_DIR=".debug"
+
+show_help() {
+    cat << EOF
+debug-logger - Automated instrumentation for existing projects
+
+USAGE:
+    debug-logger [OPTIONS]
+
+OPTIONS:
+    --auto-detect    Auto-detect and instrument all project types
+    --cli           Enable universal CLI command logging  
+    --browser       Auto-inject browser logging into web projects
+    --proxy [PORT]  Start universal proxy for any dev server (default: 3000)
+    --detect-servers Scan for running development servers
+    --status        Show current instrumentation status
+    --remove        Remove all instrumentation
+    -h, --help      Show this help
+
+EXAMPLES:
+    debug-logger --auto-detect     # Instrument everything automatically
+    debug-logger --proxy          # Proxy localhost:3000 with auto-injection
+    debug-logger --proxy 8080     # Proxy localhost:8080 with auto-injection
+    debug-logger --detect-servers # Find running dev servers
+    debug-logger --status         # Check what's currently instrumented
+EOF
+}
+
+check_debug_init() {
+    if [ ! -d "$DEBUG_DIR" ]; then
+        echo "❌ No .debug directory found. Run 'debug-init' first."
+        exit 1
+    fi
+}
+
+install_universal_cli_logging() {
+    echo "🔧 Installing universal CLI logging..."
+    
+    # Create universal shell hooks
+    cat > "$DEBUG_DIR/universal-hooks.sh" << 'EOF'
+# DevLogger Universal CLI Hooks
+# Captures ALL commands, not just specific ones
+
+DEVLOGGER_CLI_LOG=".debug/cli.log"
+DEVLOGGER_ENABLED=1
+
+# Store command before execution
+preexec() {
+    if [ "$DEVLOGGER_ENABLED" = "1" ]; then
+        DEVLOGGER_LAST_CMD="$1"
+        DEVLOGGER_START_TIME=$(date +%s.%N 2>/dev/null || date +%s)
+        
+        # Log command start
+        local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
+        echo "[$timestamp] CMD: $1" >> "$DEVLOGGER_CLI_LOG"
+    fi
+}
+
+# Log command result after execution  
+precmd() {
+    if [ "$DEVLOGGER_ENABLED" = "1" ] && [ -n "$DEVLOGGER_LAST_CMD" ]; then
+        local exit_code=$?
+        local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
+        
+        # Calculate duration if possible
+        if [ -n "$DEVLOGGER_START_TIME" ]; then
+            local end_time=$(date +%s.%N 2>/dev/null || date +%s)
+            local duration=$(echo "$end_time - $DEVLOGGER_START_TIME" | bc 2>/dev/null || echo "unknown")
+            echo "[$timestamp] EXIT: $exit_code (${duration}s)" >> "$DEVLOGGER_CLI_LOG"
+        else
+            echo "[$timestamp] EXIT: $exit_code" >> "$DEVLOGGER_CLI_LOG"
+        fi
+        
+        unset DEVLOGGER_LAST_CMD DEVLOGGER_START_TIME
+    fi
+}
+
+# Manual toggle functions
+dlog-disable() { 
+    DEVLOGGER_ENABLED=0
+    echo "🔇 DevLogger CLI logging disabled"
+}
+
+dlog-enable() { 
+    DEVLOGGER_ENABLED=1  
+    echo "🔊 DevLogger CLI logging enabled"
+}
+
+# Check if we're in a terminal that supports hooks
+if [[ "$0" = /* ]] || [[ "$0" = "-"* ]]; then
+    # Running in interactive shell
+    if [[ $- == *i* ]]; then
+        echo "🎯 DevLogger universal CLI hooks loaded!"
+        echo "   Capturing ALL commands (toggle: dlog-disable/dlog-enable)"
+    fi
+fi
+EOF
+
+    # Add to shell profiles
+    add_to_shell_profile "universal-hooks.sh"
+    
+    echo "✅ Universal CLI logging installed"
+    echo "   • Captures ALL commands, not just 7 specific ones"
+    echo "   • Toggle with: dlog-disable / dlog-enable"
+    echo "   • Restart terminal or source your shell profile"
+}
+
+detect_project_type() {
+    echo "🔍 Auto-detecting project type..."
+    
+    local project_types=()
+    
+    # Web frameworks
+    if [ -f "package.json" ]; then
+        if grep -q "next" package.json 2>/dev/null; then
+            project_types+=("next.js")
+        elif grep -q "vite" package.json 2>/dev/null; then
+            project_types+=("vite")
+        elif grep -q "react" package.json 2>/dev/null; then
+            project_types+=("react")
+        elif grep -q "vue" package.json 2>/dev/null; then
+            project_types+=("vue")
+        else
+            project_types+=("node.js")
+        fi
+    fi
+    
+    # Python frameworks
+    if [ -f "requirements.txt" ] || [ -f "pyproject.toml" ]; then
+        if grep -q -i "django\|flask\|fastapi" requirements.txt pyproject.toml 2>/dev/null; then
+            project_types+=("python-web")
+        else
+            project_types+=("python")
+        fi
+    fi
+    
+    # Other languages
+    [ -f "Cargo.toml" ] && project_types+=("rust")
+    [ -f "go.mod" ] && project_types+=("go")
+    [ -f "composer.json" ] && project_types+=("php")
+    
+    # Static sites
+    if ls *.html 2>/dev/null | head -1 > /dev/null; then
+        project_types+=("static-html")
+    fi
+    
+    if [ ${#project_types[@]} -eq 0 ]; then
+        echo "❓ No specific project type detected (generic project)"
+        project_types+=("generic")
+    else
+        echo "📦 Detected: ${project_types[*]}"
+    fi
+    
+    # Store detection results
+    printf '%s\n' "${project_types[@]}" > "$DEBUG_DIR/detected-types.txt"
+}
+
+auto_inject_browser_logging() {
+    echo "🌐 Auto-injecting browser logging..."
+    
+    if [ ! -f "$DEBUG_DIR/detected-types.txt" ]; then
+        detect_project_type
+    fi
+    
+    local types=$(cat "$DEBUG_DIR/detected-types.txt")
+    
+    # Handle different project types
+    if echo "$types" | grep -q "vite"; then
+        inject_vite_plugin
+    elif echo "$types" | grep -q "next.js"; then
+        inject_nextjs_config
+    elif echo "$types" | grep -q "static-html"; then
+        inject_static_html
+    else
+        echo "⚠️  Manual browser injection may be needed for this project type"
+        echo "   Add <script src=\".debug/console-wrapper.js\"></script> to your HTML"
+    fi
+}
+
+inject_vite_plugin() {
+    echo "⚡ Creating Vite plugin for automatic injection..."
+    
+    cat > "$DEBUG_DIR/vite-plugin-devlogger.js" << 'EOF'
+// DevLogger Vite Plugin - Auto-injects console logging
+export function devloggerPlugin() {
+  return {
+    name: 'devlogger',
+    transformIndexHtml(html) {
+      // Only inject in development
+      if (process.env.NODE_ENV !== 'production') {
+        return html.replace(
+          '<head>',
+          '<head>\n    <script src="/.debug/console-wrapper.js"></script>'
+        );
+      }
+      return html;
+    },
+    configureServer(server) {
+      // Serve .debug files
+      server.middlewares.use('/.debug', (req, res, next) => {
+        req.url = req.url.replace('/.debug', '/.debug');
+        next();
+      });
+    }
+  };
+}
+EOF
+
+    # Try to modify vite.config.js
+    if [ -f "vite.config.js" ] || [ -f "vite.config.ts" ]; then
+        echo "📝 Add this to your vite.config.js:"
+        echo "   import { devloggerPlugin } from './.debug/vite-plugin-devlogger.js';"
+        echo "   // Add devloggerPlugin() to your plugins array"
+    else
+        # Create basic vite config
+        cat > "vite.config.js" << 'EOF'
+import { devloggerPlugin } from './.debug/vite-plugin-devlogger.js';
+
+export default {
+  plugins: [devloggerPlugin()]
+};
+EOF
+        echo "✅ Created vite.config.js with DevLogger plugin"
+    fi
+}
+
+inject_static_html() {
+    echo "📄 Injecting into HTML files..."
+    
+    local count=0
+    for html_file in *.html; do
+        if [ -f "$html_file" ] && ! grep -q "console-wrapper.js" "$html_file"; then
+            # Backup original
+            cp "$html_file" "$html_file.devlogger-backup"
+            
+            # Inject script tag
+            sed 's|<head>|<head>\n    <script src=".debug/console-wrapper.js"></script>|' "$html_file.devlogger-backup" > "$html_file"
+            count=$((count + 1))
+            echo "   ✅ Injected into $html_file"
+        fi
+    done
+    
+    if [ $count -eq 0 ]; then
+        echo "   ⚠️  No HTML files found or already instrumented"
+    else
+        echo "   📊 Modified $count HTML files (backups created)"
+    fi
+}
+
+add_to_shell_profile() {
+    local script_name="$1"
+    local source_line="[ -f \"\$(pwd)/.debug/$script_name\" ] && source \"\$(pwd)/.debug/$script_name\""
+    
+    # Detect shell and profile
+    local shell_profile=""
+    if [ -n "$ZSH_VERSION" ]; then
+        shell_profile="$HOME/.zshrc"
+    elif [ -n "$BASH_VERSION" ]; then
+        if [ -f "$HOME/.bashrc" ]; then
+            shell_profile="$HOME/.bashrc"
+        elif [ -f "$HOME/.bash_profile" ]; then
+            shell_profile="$HOME/.bash_profile"
+        fi
+    fi
+    
+    if [ -n "$shell_profile" ] && [ -f "$shell_profile" ]; then
+        if ! grep -q "$script_name" "$shell_profile" 2>/dev/null; then
+            echo "" >> "$shell_profile"
+            echo "# DevLogger auto-generated - Universal CLI logging" >> "$shell_profile"
+            echo "$source_line" >> "$shell_profile"
+            echo "   📝 Added to $shell_profile"
+        else
+            echo "   ✅ Already in $shell_profile"
+        fi
+    else
+        echo "   ⚠️  Couldn't detect shell profile. Manually add:"
+        echo "      $source_line"
+    fi
+}
+
+show_status() {
+    echo "📊 DevLogger Instrumentation Status"
+    echo "=================================="
+    
+    if [ ! -d "$DEBUG_DIR" ]; then
+        echo "❌ Not initialized (run 'debug-init' first)"
+        return
+    fi
+    
+    echo "📁 Debug directory: ✅ Present"
+    
+    # CLI logging status
+    if [ -f "$DEBUG_DIR/universal-hooks.sh" ]; then
+        echo "🖥️  CLI logging: ✅ Universal hooks installed"
+    elif [ -f "$DEBUG_DIR/shell-functions.sh" ]; then
+        echo "🖥️  CLI logging: ⚠️  Legacy (7 commands only)"
+    else
+        echo "🖥️  CLI logging: ❌ Not installed"
+    fi
+    
+    # Browser logging status  
+    if [ -f "$DEBUG_DIR/console-wrapper.js" ]; then
+        echo "🌐 Browser logging: ✅ Console wrapper ready"
+        
+        # Check injection status
+        local injected=0
+        if [ -f "$DEBUG_DIR/vite-plugin-devlogger.js" ]; then
+            echo "   ⚡ Vite plugin: ✅ Created"
+            injected=1
+        fi
+        
+        for html_file in *.html; do
+            if [ -f "$html_file" ] && grep -q "console-wrapper.js" "$html_file"; then
+                echo "   📄 HTML injection: ✅ $html_file"
+                injected=1
+            fi
+        done
+        
+        if [ $injected -eq 0 ]; then
+            echo "   ⚠️  Not auto-injected (manual setup needed)"
+        fi
+    else
+        echo "🌐 Browser logging: ❌ Not configured"
+    fi
+    
+    # Log server status
+    if pgrep -f "log-server.js" > /dev/null; then
+        echo "🔄 Log server: ✅ Running (port 3333)"
+    else
+        echo "🔄 Log server: ❌ Not running"
+    fi
+    
+    # Project detection
+    if [ -f "$DEBUG_DIR/detected-types.txt" ]; then
+        local types=$(cat "$DEBUG_DIR/detected-types.txt" | tr '\n' ' ')
+        echo "📦 Project types: $types"
+    else
+        echo "📦 Project types: Not detected"
+    fi
+    
+    # Log files
+    echo ""
+    echo "📋 Log Files:"
+    for log_file in "$DEBUG_DIR"/*.log; do
+        if [ -f "$log_file" ]; then
+            local size=$(wc -l < "$log_file" 2>/dev/null || echo "0")
+            echo "   $(basename "$log_file"): $size lines"
+        fi
+    done
+}
+
+detect_running_servers() {
+    echo "🔍 Scanning for running development servers..."
+    
+    local common_ports=(3000 3001 4000 5000 5173 8000 8080 8888 9000)
+    local found_servers=()
+    
+    for port in "${common_ports[@]}"; do
+        if lsof -i :$port >/dev/null 2>&1; then
+            local process=$(lsof -i :$port | tail -1 | awk '{print $1}')
+            echo "   ✅ Port $port: $process"
+            found_servers+=("$port")
+        fi
+    done
+    
+    if [ ${#found_servers[@]} -eq 0 ]; then
+        echo "   ❌ No development servers found on common ports"
+        echo "   💡 Start your dev server and try again"
+    else
+        echo ""
+        echo "🚀 Found ${#found_servers[@]} server(s). To auto-inject logging:"
+        for port in "${found_servers[@]}"; do
+            echo "   debug-logger --proxy $port"
+        done
+    fi
+}
+
+start_proxy_server() {
+    local target_port="${1:-3000}"
+    local proxy_port=3334
+    
+    echo "🔄 Starting DevLogger proxy server..."
+    echo "   📡 Proxy: http://localhost:$proxy_port"
+    echo "   🎯 Target: http://localhost:$target_port"
+    
+    # Check if target is running
+    if ! lsof -i :$target_port >/dev/null 2>&1; then
+        echo "   ⚠️  Target server at localhost:$target_port not responding"
+        echo "   💡 Start your dev server first, then run:"
+        echo "      debug-logger --proxy $target_port"
+        return 1
+    fi
+    
+    # Check if proxy port is available
+    if lsof -i :$proxy_port >/dev/null 2>&1; then
+        echo "   ❌ Port $proxy_port already in use"
+        return 1
+    fi
+    
+    # Create simple Node.js proxy script
+    cat > "$DEBUG_DIR/proxy-server.js" << EOF
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+
+const PROXY_PORT = $proxy_port;
+const TARGET_PORT = $target_port;
+
+// Production safety check
+if (process.env.NODE_ENV === 'production') {
+  console.error('❌ DevLogger proxy should not run in production');
+  process.exit(1);
+}
+
+const CONSOLE_SCRIPT = fs.readFileSync(path.join(__dirname, 'console-wrapper.js'), 'utf8');
+
+const server = http.createServer((req, res) => {
+  const proxyReq = http.request({
+    hostname: 'localhost',
+    port: TARGET_PORT,
+    path: req.url,
+    method: req.method,
+    headers: req.headers
+  }, (proxyRes) => {
+    const contentType = proxyRes.headers['content-type'] || '';
+    
+    if (!contentType.includes('text/html')) {
+      res.writeHead(proxyRes.statusCode, proxyRes.headers);
+      proxyRes.pipe(res);
+      return;
+    }
+    
+    let body = '';
+    proxyRes.on('data', chunk => body += chunk.toString());
+    proxyRes.on('end', () => {
+      if (body.includes('<head>') && !body.includes('DevLogger Console Wrapper')) {
+        const injection = \`<head>
+    <script>
+      // DevLogger Console Wrapper (Injected by Proxy)
+      \${CONSOLE_SCRIPT}
+    </script>\`;
+        body = body.replace('<head>', injection);
+        res.setHeader('content-length', Buffer.byteLength(body));
+      }
+      res.writeHead(proxyRes.statusCode, proxyRes.headers);
+      res.end(body);
+    });
+  });
+  
+  proxyReq.on('error', err => {
+    res.writeHead(502, {'Content-Type': 'text/plain'});
+    res.end('Bad Gateway');
+  });
+  
+  req.pipe(proxyReq);
+});
+
+server.listen(PROXY_PORT, () => {
+  console.log(\`🌐 DevLogger proxy active - visit http://localhost:\${PROXY_PORT}\`);
+  console.log('   🛑 Stop with Ctrl+C');
+});
+
+process.on('SIGINT', () => {
+  console.log('\\n🛑 Proxy stopped');
+  process.exit(0);
+});
+EOF
+    
+    echo "   🌐 Browser logging will be auto-injected"
+    echo "   🛑 Stop with Ctrl+C"
+    echo ""
+    
+    # Start the proxy
+    node "$DEBUG_DIR/proxy-server.js"
+}
+
+remove_instrumentation() {
+    echo "🧹 Removing DevLogger instrumentation..."
+    
+    # Remove HTML injections (restore backups)
+    local restored=0
+    for backup in *.html.devlogger-backup; do
+        if [ -f "$backup" ]; then
+            local original="${backup%.devlogger-backup}"
+            mv "$backup" "$original"
+            echo "   ↩️  Restored $original"
+            restored=$((restored + 1))
+        fi
+    done
+    
+    # Remove from shell profiles
+    if [ -n "$ZSH_VERSION" ] && [ -f "$HOME/.zshrc" ]; then
+        sed -i.bak '/DevLogger auto-generated/d; /universal-hooks.sh/d; /shell-functions.sh/d' "$HOME/.zshrc"
+        echo "   🐚 Cleaned ~/.zshrc"
+    elif [ -n "$BASH_VERSION" ]; then
+        for profile in "$HOME/.bashrc" "$HOME/.bash_profile"; do
+            if [ -f "$profile" ]; then
+                sed -i.bak '/DevLogger auto-generated/d; /universal-hooks.sh/d; /shell-functions.sh/d' "$profile"
+                echo "   🐚 Cleaned $profile"
+            fi
+        done
+    fi
+    
+    echo "✅ Instrumentation removed"
+    echo "   📁 .debug directory preserved (logs intact)"
+    echo "   🔄 Restart terminal to complete removal"
+}
+
+# Main execution
+case "${1:-}" in
+    --auto-detect)
+        check_debug_init
+        detect_project_type
+        install_universal_cli_logging
+        auto_inject_browser_logging
+        echo ""
+        echo "🎉 Auto-detection and instrumentation complete!"
+        echo "   Restart your terminal and start your dev server"
+        echo "   💡 For universal browser logging: debug-logger --proxy"
+        ;;
+    --cli)
+        check_debug_init
+        install_universal_cli_logging
+        ;;
+    --browser)
+        check_debug_init
+        auto_inject_browser_logging
+        ;;
+    --proxy)
+        check_debug_init
+        start_proxy_server "$2"
+        ;;
+    --detect-servers)
+        detect_running_servers
+        ;;
+    --status)
+        show_status
+        ;;
+    --remove)
+        remove_instrumentation
+        ;;
+    -h|--help)
+        show_help
+        ;;
+    "")
+        show_help
+        echo ""
+        echo "💡 Quick start: debug-logger --auto-detect"
+        ;;
+    *)
+        echo "❌ Unknown option: $1"
+        echo "   Use 'debug-logger --help' for usage"
+        exit 1
+        ;;
+esac
