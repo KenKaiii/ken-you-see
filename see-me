@@ -11,28 +11,27 @@ show_help() {
 see-me - Smart Browser Console Logging
 
 USAGE:
-    see-me [PORT]           # Start logging for specific port (recommended)
-    see-me                  # Auto-detect running dev server (if only one)
+    npm run dev & see-me    # One command - auto-detects new server port
+    see-me [PORT]           # Connect to specific port
     see-me logs             # View captured browser logs  
     see-me stop             # Stop logging services
     see-me status           # Show current status
 
-SAFE WORKFLOWS:
-    # Method 1: Specify port explicitly (recommended)
-    npm run dev             # Note the port from output (e.g., 8080)
-    see-me 8080             # Connect to that specific port
+WORKFLOWS:
+    # Method 1: Single command (recommended)
+    npm run dev & see-me    # Automatically detects the port from new server
     
-    # Method 2: Sequential start
-    npm run dev             # Start your dev server first
-    see-me                  # Auto-detect (only if exactly one dev server running)
+    # Method 2: Explicit port
+    see-me 8080             # Connect to port 8080 specifically
 
 FEATURES:
-    ✅ Safe port detection - only connects to intended server
-    ✅ Auto-detects project type (React, Next.js, Django, Vite, etc.)
+    ✅ Detects newly started dev servers automatically
+    ✅ Works with any framework (React, Django, Python, Node, etc.)
     ✅ Browser console log capture with proxy injection
     ✅ Agent-readable log files
 
 EXAMPLE:
+    npm run dev & see-me
     # Visit http://localhost:3334 instead of your normal dev server URL
     # All console logs automatically captured for agents to read
 EOF
@@ -367,20 +366,72 @@ EOF
     fi
 }
 
+detect_newly_started_server() {
+    echo "🔍 Detecting newly started development server..." >&2
+    
+    # Wait a moment for the server to fully start
+    local max_attempts=10
+    local attempt=0
+    
+    while [ $attempt -lt $max_attempts ]; do
+        sleep 1
+        attempt=$((attempt + 1))
+        
+        # Get current processes on common dev ports
+        local common_ports=(3000 3001 3002 5173 8000 8080 8888 9000 9999 4000 5500)
+        
+        for port in "${common_ports[@]}"; do
+            if lsof -i :$port >/dev/null 2>&1; then
+                local process_info=$(lsof -i :$port | tail -1)
+                local process_name=$(echo "$process_info" | awk '{print $1}')
+                local pid=$(echo "$process_info" | awk '{print $2}')
+                
+                # Check if this is a dev server process
+                case "$process_name" in
+                    node|Node|python*|Python*|ruby|Rails|php|nginx|http-server|webpack*|vite|next*|live-server)
+                        # Check if this process is recent (started within last 30 seconds)
+                        local process_start=$(ps -o lstart= -p "$pid" 2>/dev/null)
+                        if [ -n "$process_start" ]; then
+                            echo "   ✅ Found $process_name on port $port (PID: $pid)" >&2
+                            echo "$port"
+                            return 0
+                        fi
+                        ;;
+                esac
+            fi
+        done
+        
+        echo "   ⏳ Waiting for dev server to start... (attempt $attempt/$max_attempts)" >&2
+    done
+    
+    echo "   ❌ No new dev server detected within timeout" >&2
+    return 1
+}
+
 start_smart_logging() {
     local explicit_port="$1"
     initialize_logging
     
-    # Try to find the target port safely
-    local target_port=$(safe_port_selection "$explicit_port")
+    local target_port
     
-    if [ $? -ne 0 ]; then
-        echo ""
-        echo "💡 Safe workflow examples:"
-        echo "   see-me 3000      # Connect to port 3000 specifically"
-        echo "   see-me 8080      # Connect to port 8080 specifically"
-        echo "   see-me           # Auto-detect (only if exactly one dev server)"
-        return 1
+    if [ -n "$explicit_port" ]; then
+        # Port explicitly specified
+        if lsof -i :$explicit_port >/dev/null 2>&1; then
+            target_port="$explicit_port"
+            echo "🎯 Using specified port $target_port" >&2
+        else
+            echo "❌ Port $explicit_port is not in use" >&2
+            return 1
+        fi
+    else
+        # Auto-detect newly started server
+        target_port=$(detect_newly_started_server)
+        if [ $? -ne 0 ]; then
+            echo ""
+            echo "💡 Make sure to run: npm run dev & see-me"
+            echo "💡 Or specify port manually: see-me [PORT]"
+            return 1
+        fi
     fi
     
     echo ""
