@@ -1,243 +1,170 @@
-# DevLogger - Universal Debug Logging for Agents
+# see-me 👀
 
-DevLogger automatically captures ALL console logs (browser + CLI) so coding agents can debug without manual copy/paste.
+```
+    ███████ ███████ ███████       ███    ███ ███████ 
+    ██      ██      ██            ████  ████ ██      
+    ███████ █████   █████   █████ ██ ████ ██ █████   
+         ██ ██      ██            ██  ██  ██ ██      
+    ███████ ███████ ███████       ██      ██ ███████ 
+    
+    Auto-capture browser console logs for coding agents
+    No copy/paste needed - agents see everything automatically
+```
 
-## 🚀 Quick Start (5 minutes)
+## 🚀 Super Quick Setup
 
-### Step 1: Copy Files to Your Project
+### Step 1: Install
 ```bash
-# Copy these 2 files to your project root:
-cp debug-init your-project/
-cp debug-logger your-project/
-cd your-project/
-chmod +x debug-init debug-logger
+curl -fsSL https://raw.githubusercontent.com/KenKaiii/ken-you-see/main/install.sh | bash
 ```
 
-### Step 2: Initialize (One-time Setup)
+### Step 2: Use It
 ```bash
-# Creates .debug/ folder and sets up logging
-./debug-init
-
-# Auto-detects your project type and installs hooks
-./debug-logger --auto-detect
+npm run dev & see-me
+# Visit http://localhost:3334 instead of your normal dev server
 ```
 
-### Step 3: Start Development Session
+**That's it!** All browser console logs now automatically captured.
+
+## 📱 How It Works
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Your Browser  │───▶│   see-me proxy  │───▶│  Your Dev Server│
+│  localhost:3334 │    │ (auto-captures) │    │  localhost:3000 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+                               │
+                               ▼
+                        ┌─────────────────┐
+                        │  browser.log    │
+                        │ (for agents to  │
+                        │     read)       │
+                        └─────────────────┘
+```
+
+**You use your app normally, logs captured invisibly in background.**
+
+## 🤖 For Coding Agents (Claude Code)
+
+When debugging user issues, just read the log file:
+
 ```bash
-# 1. Start your normal dev server first
-npm start                 # React/Next.js (port 3000)
-# OR python manage.py runserver  # Django (port 8000)  
-# OR php -S localhost:8080       # PHP (port 8080)
-# OR any web server
+# See all browser activity
+see-me logs
 
-# 2. In a new terminal, find your server
-./debug-logger --detect-servers
+# Find recent errors  
+grep "ERROR" .devlogger/browser.log | tail -5
 
-# 3. Start DevLogger proxy (replace 3000 with your port)
-node .debug/log-server.js &
-./debug-logger --proxy 3000
+# Search specific issues
+grep -i "cannot read property" .devlogger/browser.log
 
-# 4. Visit PROXY URL instead of normal URL
-# http://localhost:3334 instead of http://localhost:3000
+# Live monitoring
+tail -f .devlogger/browser.log
 ```
 
-**That's it!** All logs are now captured automatically.
-
-## 📂 What Gets Created
-
+### Example Agent Debugging:
 ```
-your-project/
-├── .debug/
-│   ├── cli.log           ← All terminal commands & output
-│   ├── browser.log       ← All console.log/error/warn from browser  
-│   ├── console-wrapper.js ← Browser logging script
-│   ├── log-server.js     ← Collects browser logs
-│   └── universal-hooks.sh ← Captures CLI commands
-├── debug-init            ← Setup script
-└── debug-logger          ← Main control script
+User: "My React app is broken, can you help?"
+
+Agent runs: see-me logs
+
+Agent sees:
+[2025-07-23T15:30:45.123Z] BROWSER ERROR: Cannot read property 'map' of undefined at UserList.jsx:23
+[2025-07-23T15:30:45.200Z] BROWSER ERROR: Network request failed: 404 /api/users
+[2025-07-23T15:30:46.100Z] BROWSER WARN: Component re-rendered 50 times
+
+Agent responds: "I can see the issue - your UserList component is trying to map 
+over undefined data because the /api/users endpoint is returning 404. Let me help 
+you fix the API endpoint first..."
 ```
 
-## 🔍 How Agents Use the Logs
+## 🛠️ Commands
 
-Agents can read these files to understand what's happening:
-
-### CLI Logs (Every Terminal Command)
 ```bash
-cat .debug/cli.log
+see-me                 # Auto-start logging (detects your project)
+see-me logs           # View captured browser logs  
+see-me status         # Check if services are running
+see-me stop           # Stop logging services
 ```
-Shows:
-- Every command you run (`npm install`, `git commit`, `python script.py`)
-- Command output and error messages  
-- Exit codes and timing
-- Works with ANY command (not just npm/python)
 
-### Browser Logs (Every Console Message)
+## 🎯 What Gets Captured
+
+- ✅ All `console.log()`, `console.error()`, `console.warn()`
+- ✅ JavaScript errors with file locations
+- ✅ Network failures (if you log them)
+- ✅ Performance warnings
+- ✅ User interactions (if you log them)
+- ✅ Component lifecycle events
+
+## 🔧 Works With Everything
+
+```
+    React    Next.js    Vue    Nuxt    Django    Flask
+      │        │        │       │        │        │
+      └────────┼────────┼───────┼────────┼────────┘
+               │        │       │        │
+           Auto-detects project type and port
+               │        │       │        │
+      ┌────────┼────────┼───────┼────────┼────────┐
+      │        │        │       │        │        │
+   Static   Vite   Angular  Rails    PHP    Rust
+```
+
+**No configuration needed - just works.**
+
+## 📋 Quick Examples
+
+### React/Next.js
 ```bash
-cat .debug/browser.log  
+npm run dev & see-me
+# Visit: http://localhost:3334
 ```
-Shows:
-- All `console.log()`, `console.error()`, `console.warn()` from your app
-- JavaScript errors and stack traces
-- Network failures, API responses  
-- React/Vue component errors
-- Timestamps and automatic deduplication
 
-## 🛠️ Commands Reference
-
-### Setup Commands
+### Django  
 ```bash
-./debug-init                    # Initial setup (run once)
-./debug-logger --auto-detect    # Install automation (run once)  
+python manage.py runserver & see-me
+# Visit: http://localhost:3334
 ```
 
-### Daily Development
+### Any Framework
 ```bash
-./debug-logger --detect-servers # Find running dev servers
-./debug-logger --proxy 3000     # Proxy server on port 3000
-./debug-logger --status         # Check what's instrumented
-node .debug/log-server.js &     # Start log collection server
+# Start your dev server however you normally do
+your-dev-command &
+see-me
+# Visit: http://localhost:3334
 ```
 
-### Maintenance  
-```bash
-./debug-logger --remove         # Clean uninstall
-./debug-logger --help           # Show all options
-```
+## 🎪 The Magic
 
-## ✅ Supported Frameworks
+1. **Smart Detection**: Figures out your project (React vs Django vs etc)
+2. **Auto Port Finding**: Finds your running dev server automatically  
+3. **Invisible Proxy**: Same app experience, but with logging
+4. **Agent Ready**: Clean log files that agents can read directly
 
-### Browser Logging (Automatic)
-- **React, Vue, Angular** - Any JavaScript framework
-- **Next.js, Nuxt, SvelteKit** - Meta-frameworks  
-- **Django, Flask, Rails** - Backend with HTML templates
-- **PHP, WordPress, Laravel** - PHP applications
-- **Static HTML** - Plain HTML/CSS/JS sites
-- **Any web server** - Works universally via proxy
+## 🚨 Troubleshooting
 
-### CLI Logging (Automatic)  
-- **All Commands** - git, npm, python, docker, curl, etc.
-- **All Languages** - Node.js, Python, Go, Rust, PHP, Java
-- **All Tools** - Package managers, build tools, databases
-
-## 🔧 How It Works
-
-### CLI Logging
-- Installs shell hooks that capture every command
-- No more copy/pasting terminal output to agents
-- Works in bash/zsh across all projects
-
-### Browser Logging  
-- Proxy server intercepts your dev server's HTML
-- Automatically injects console capture script
-- All browser logs sent to `.debug/browser.log`
-- Works with any framework - no code changes needed
-
-## 📋 Troubleshooting
-
-### "Port already in use"
-```bash
-# Kill existing processes
-pkill -f "log-server.js"
-pkill -f "debug-logger"
-```
-
-### "No servers detected"  
+**No server detected?**
 ```bash
 # Start your dev server first, then:
-./debug-logger --detect-servers
+see-me
 ```
 
-### "Proxy not working"
+**Services not starting?**  
 ```bash
-# Check if target server is running
-curl http://localhost:3000
-
-# Check if proxy is running  
-curl http://localhost:3334
+see-me stop && see-me
 ```
 
-### "Logs not appearing"
+**Wrong port detected?**
 ```bash
-# Check log server is running
-ps aux | grep log-server
-
-# Check proxy is injecting script
-curl http://localhost:3334 | grep "DevLogger"
+# Check what's running:
+see-me status
 ```
-
-### "Shell functions not working"
-```bash
-# Restart terminal or manually source:
-source .debug/universal-hooks.sh
-```
-
-## 🗂️ Real Examples
-
-### React Development
-```bash
-# Setup (once)
-./debug-init
-./debug-logger --auto-detect
-
-# Daily workflow
-npm start                        # React dev server on 3000
-node .debug/log-server.js &     # Start log collection  
-./debug-logger --proxy 3000    # Proxy with auto-injection
-# Visit http://localhost:3334
-
-# Logs captured automatically
-tail -f .debug/browser.log      # React component errors, state changes
-tail -f .debug/cli.log          # npm commands, build output
-```
-
-### Django Development  
-```bash
-# Setup (once)
-./debug-init  
-./debug-logger --auto-detect
-
-# Daily workflow
-python manage.py runserver      # Django on port 8000
-node .debug/log-server.js &    # Start log collection
-./debug-logger --proxy 8000   # Proxy Django server
-# Visit http://localhost:3334
-
-# Logs captured automatically  
-tail -f .debug/browser.log     # JavaScript errors, AJAX failures
-tail -f .debug/cli.log         # Django commands, database queries
-```
-
-## 🤖 For Coding Agents
-
-When debugging, agents should check:
-
-```bash
-# Recent browser errors
-grep "ERROR" .debug/browser.log | tail -10
-
-# Recent CLI failures  
-grep "EXIT: [^0]" .debug/cli.log | tail -10
-
-# Specific timeframes
-grep "2025-07-23T15:" .debug/browser.log
-
-# Command that failed
-grep -A 5 -B 5 "npm install" .debug/cli.log
-```
-
-## 🔒 Security Notes
-
-- **Development only** - Don't use in production
-- **Local files only** - Logs stay on your machine  
-- **No network data** - Only captures console output
-- **Easy removal** - `./debug-logger --remove` cleans everything
-
-## 📞 Support
-
-- Check `./debug-logger --help` for all options
-- Use `./debug-logger --status` to diagnose issues
-- Logs are in `.debug/cli.log` and `.debug/browser.log`
 
 ---
 
-**Result**: Agents get complete visibility into your development environment without manual copy/paste. Every command, every console message, automatically captured.
+**🎉 Result: Agents get complete browser debugging context without manual copy/paste!**
+
+```
+Before: User manually copies error messages to agent
+After:  Agent automatically sees everything that happened
+```

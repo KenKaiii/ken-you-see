@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# DevLogger Universal Installer
+# see-me installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/KenKaiii/ken-you-see/main/install.sh | bash
 
 set -e
@@ -8,7 +8,7 @@ set -e
 REPO_URL="https://raw.githubusercontent.com/KenKaiii/ken-you-see/main"
 INSTALL_DIR="$(pwd)"
 
-echo "🚀 Installing DevLogger..."
+echo "👀 Installing see-me..."
 
 # Platform detection
 OS=""
@@ -23,26 +23,26 @@ esac
 echo "📦 Detected platform: $OS"
 
 # Download files
-echo "⬇️  Downloading debug-init..."
+echo "⬇️  Downloading see-me..."
 if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$REPO_URL/debug-init" -o debug-init
-    curl -fsSL "$REPO_URL/debug-logger" -o debug-logger
+    curl -fsSL "$REPO_URL/see-me" -o see-me
 elif command -v wget >/dev/null 2>&1; then
-    wget -q "$REPO_URL/debug-init" -O debug-init
-    wget -q "$REPO_URL/debug-logger" -O debug-logger
+    wget -q "$REPO_URL/see-me" -O see-me
 else
     echo "❌ Neither curl nor wget found. Please install one of them."
     exit 1
 fi
 
 # Make executable
-chmod +x debug-init debug-logger
+chmod +x see-me
 
-echo "✅ DevLogger installed successfully!"
+echo "✅ see-me installed successfully!"
 echo ""
 echo "🎯 Quick start:"
-echo "   ./debug-init"
-echo "   ./debug-logger --auto-detect"
+echo "   npm run dev & see-me"
+echo "   # Visit http://localhost:3334"
 echo ""
-echo "📚 Full documentation:"
-echo "   ./debug-logger --help"
+echo "📚 More commands:"
+echo "   see-me logs    # View captured logs"
+echo "   see-me status  # Check services"
+echo "   see-me stop    # Stop services"

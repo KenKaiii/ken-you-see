@@ -1,0 +1,461 @@
+#!/bin/bash
+
+# see-me - Intelligent Browser Console Logging
+# Auto-detects project type and running dev servers
+# Usage: npm run dev & see-me
+
+set -e
+
+show_help() {
+    cat << EOF
+see-me - Smart Browser Console Logging
+
+USAGE:
+    npm run dev & see-me    # Auto-detect everything and start logging
+    see-me                  # Auto-detect and start (if dev server already running)
+    see-me logs             # View captured browser logs
+    see-me stop             # Stop logging services
+    see-me status           # Show current status
+
+SMART FEATURES:
+    ✅ Auto-detects project type (React, Next.js, Django, Vite, etc.)
+    ✅ Auto-finds running dev server port
+    ✅ Auto-starts logging services
+    ✅ Just visit the proxy URL and logs are captured automatically
+
+EXAMPLE WORKFLOW:
+    npm run dev & see-me    # One command starts everything
+    # Visit http://localhost:3334 instead of your normal dev server URL
+    # All console logs automatically captured for agents to read
+EOF
+}
+
+detect_project_type() {
+    local project_type="unknown"
+    local expected_port=""
+    
+    echo "🔍 Auto-detecting project type..."
+    
+    # Check for package.json (Node.js projects)
+    if [ -f "package.json" ]; then
+        if grep -q '"next"' package.json 2>/dev/null; then
+            project_type="Next.js"
+            expected_port="3000"
+        elif grep -q '"vite"' package.json 2>/dev/null; then
+            project_type="Vite"
+            expected_port="5173"
+        elif grep -q '"react"' package.json 2>/dev/null; then
+            project_type="React"
+            expected_port="3000"
+        elif grep -q '"vue"' package.json 2>/dev/null; then
+            project_type="Vue"
+            expected_port="8080"
+        elif grep -q '"nuxt"' package.json 2>/dev/null; then
+            project_type="Nuxt"
+            expected_port="3000"
+        else
+            project_type="Node.js"
+            expected_port="3000"
+        fi
+        
+    # Check for Python projects
+    elif [ -f "manage.py" ] || [ -f "requirements.txt" ]; then
+        if [ -f "manage.py" ]; then
+            project_type="Django"
+            expected_port="8000"
+        else
+            project_type="Python"
+            expected_port="8000"
+        fi
+        
+    # Check for other frameworks
+    elif [ -f "Cargo.toml" ]; then
+        project_type="Rust"
+        expected_port="8080"
+    elif [ -f "go.mod" ]; then
+        project_type="Go"
+        expected_port="8080"
+    elif [ -f "composer.json" ]; then
+        project_type="PHP"
+        expected_port="8000"
+    else
+        project_type="Static HTML"
+        expected_port="8000"
+    fi
+    
+    echo "📦 Detected: $project_type (expected port: $expected_port)"
+    echo "$project_type|$expected_port"
+}
+
+find_running_dev_server() {
+    echo "🔍 Scanning for running development servers..."
+    
+    # Common dev server ports
+    local common_ports=(3000 3001 3002 5173 8000 8080 8888 9000 4000 5000)
+    local found_ports=()
+    
+    for port in "${common_ports[@]}"; do
+        if lsof -i :$port >/dev/null 2>&1; then
+            local process_name=$(lsof -i :$port | tail -1 | awk '{print $1}')
+            echo "   ✅ Port $port: $process_name"
+            found_ports+=("$port")
+        fi
+    done
+    
+    if [ ${#found_ports[@]} -eq 0 ]; then
+        echo "   ❌ No development servers found"
+        echo "   💡 Start your dev server first: npm run dev (or equivalent)"
+        return 1
+    fi
+    
+    # Return the first found port (most likely to be the dev server)
+    echo "${found_ports[0]}"
+}
+
+smart_port_selection() {
+    local project_info=$(detect_project_type)
+    local project_type=$(echo "$project_info" | cut -d'|' -f1)
+    local expected_port=$(echo "$project_info" | cut -d'|' -f2)
+    
+    # First, check if the expected port is running
+    if lsof -i :$expected_port >/dev/null 2>&1; then
+        echo "🎯 Found $project_type server on expected port $expected_port"
+        echo "$expected_port"
+        return 0
+    fi
+    
+    # If not, scan for any running dev server
+    echo "⚠️  Expected port $expected_port not in use, scanning for alternatives..."
+    local found_port=$(find_running_dev_server)
+    
+    if [ $? -eq 0 ]; then
+        echo "🎯 Using port $found_port"
+        echo "$found_port"
+        return 0
+    else
+        return 1
+    fi
+}
+
+wait_for_dev_server() {
+    local max_wait=30  # seconds
+    local wait_count=0
+    
+    echo "⏳ Waiting for dev server to start..."
+    
+    while [ $wait_count -lt $max_wait ]; do
+        if find_running_dev_server >/dev/null 2>&1; then
+            echo "✅ Dev server detected!"
+            return 0
+        fi
+        sleep 1
+        wait_count=$((wait_count + 1))
+        echo -n "."
+    done
+    
+    echo ""
+    echo "❌ Timeout waiting for dev server"
+    echo "   Make sure your dev server started successfully"
+    return 1
+}
+
+initialize_logging() {
+    if [ ! -d ".devlogger" ]; then
+        echo "🔧 First time setup - initializing browser logging..."
+        
+        mkdir -p .devlogger
+        touch .devlogger/browser.log
+        
+        # Create console wrapper (same as before)
+        cat > .devlogger/console-wrapper.js << 'EOF'
+// DevLogger Console Wrapper - Captures browser console output
+(function() {
+    'use strict';
+    
+    const originalConsole = { ...console };
+    const logs = [];
+    const LOG_SERVER_URL = 'http://localhost:3333/save-log';
+    
+    function hashMessage(msg) {
+        return btoa(JSON.stringify(msg)).slice(0, 10);
+    }
+    
+    function addLog(level, args) {
+        const message = args.map(arg => 
+            typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+        ).join(' ');
+        
+        const hash = hashMessage(message);
+        const timestamp = new Date().toISOString();
+        
+        // Check for duplicates
+        const existing = logs.find(log => log.hash === hash);
+        if (existing) {
+            existing.count++;
+            existing.message = `${message} (seen ${existing.count} times)`;
+        } else {
+            logs.push({ hash, message, level, timestamp, count: 1 });
+        }
+        
+        // Send to server
+        const logEntry = existing || logs[logs.length - 1];
+        fetch(LOG_SERVER_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                timestamp: logEntry.timestamp,
+                level: level.toUpperCase(),
+                message: logEntry.message
+            })
+        }).catch(() => {
+            localStorage.setItem('devlogger-logs', JSON.stringify(logs));
+        });
+    }
+    
+    // Override console methods
+    ['log', 'error', 'warn', 'info'].forEach(method => {
+        console[method] = function(...args) {
+            addLog(method, args);
+            originalConsole[method].apply(console, arguments);
+        };
+    });
+    
+    // Capture uncaught errors
+    window.addEventListener('error', (e) => {
+        addLog('error', [`Uncaught Error: ${e.message}`, `at ${e.filename}:${e.lineno}`]);
+    });
+    
+    window.addEventListener('unhandledrejection', (e) => {
+        addLog('error', [`Unhandled Promise Rejection: ${e.reason}`]);
+    });
+    
+    console.log('🔍 see-me active - console output being captured');
+})();
+EOF
+
+        # Create log server (same as before)
+        cat > .devlogger/log-server.js << 'EOF'
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+
+const PORT = 3333;
+const LOG_FILE = path.join(__dirname, 'browser.log');
+
+const server = http.createServer((req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    
+    if (req.method === 'OPTIONS') {
+        res.writeHead(200);
+        res.end();
+        return;
+    }
+    
+    if (req.method === 'POST' && req.url === '/save-log') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            try {
+                const log = JSON.parse(body);
+                const logLine = `[${log.timestamp}] BROWSER ${log.level}: ${log.message}\n`;
+                fs.appendFileSync(LOG_FILE, logLine);
+                res.writeHead(200, {'Content-Type': 'application/json'});
+                res.end(JSON.stringify({success: true}));
+            } catch (err) {
+                res.writeHead(400);
+                res.end('Invalid JSON');
+            }
+        });
+    } else {
+        res.writeHead(404);
+        res.end('Not found');
+    }
+});
+
+server.listen(PORT, () => {
+    console.log(`🌐 see-me log server running on http://localhost:${PORT}`);
+});
+EOF
+
+        # Create smart proxy
+        cat > .devlogger/proxy.js << 'EOF'
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+
+const PROXY_PORT = 3334;
+const TARGET_PORT = process.argv[2] || 3000;
+const CONSOLE_SCRIPT = fs.readFileSync(path.join(__dirname, 'console-wrapper.js'), 'utf8');
+
+console.log(`🔄 Smart proxy: localhost:${PROXY_PORT} → localhost:${TARGET_PORT}`);
+
+const server = http.createServer((req, res) => {
+    const proxyReq = http.request({
+        hostname: 'localhost',
+        port: TARGET_PORT,
+        path: req.url,
+        method: req.method,
+        headers: req.headers
+    }, (proxyRes) => {
+        const contentType = proxyRes.headers['content-type'] || '';
+        
+        if (!contentType.includes('text/html')) {
+            res.writeHead(proxyRes.statusCode, proxyRes.headers);
+            proxyRes.pipe(res);
+            return;
+        }
+        
+        let body = '';
+        proxyRes.on('data', chunk => body += chunk);
+        proxyRes.on('end', () => {
+            if (body.includes('<head>')) {
+                const script = `<script>${CONSOLE_SCRIPT}</script>`;
+                body = body.replace('<head>', `<head>${script}`);
+            }
+            
+            res.writeHead(proxyRes.statusCode, {
+                ...proxyRes.headers,
+                'content-length': Buffer.byteLength(body)
+            });
+            res.end(body);
+        });
+    });
+    
+    proxyReq.on('error', () => {
+        res.writeHead(502);
+        res.end('Target server not available');
+    });
+    
+    req.pipe(proxyReq);
+});
+
+server.listen(PROXY_PORT, () => {
+    console.log(`🌐 Visit http://localhost:${PROXY_PORT} (instead of localhost:${TARGET_PORT})`);
+});
+EOF
+
+        echo "✅ Browser logging initialized!"
+    fi
+}
+
+start_smart_logging() {
+    initialize_logging
+    
+    # Try to find the target port intelligently
+    local target_port=$(smart_port_selection)
+    
+    if [ $? -ne 0 ]; then
+        echo "❌ Could not find a running development server"
+        echo ""
+        echo "💡 Try this workflow:"
+        echo "   1. Start your dev server: npm run dev (or python manage.py runserver, etc.)"
+        echo "   2. Then run: see-me"
+        echo "   3. Or use one command: npm run dev & see-me"
+        return 1
+    fi
+    
+    echo ""
+    echo "🚀 Starting smart browser logging for port $target_port..."
+    
+    # Stop any existing services
+    pkill -f "log-server.js" 2>/dev/null || true
+    pkill -f "proxy.js" 2>/dev/null || true
+    
+    # Start services
+    /opt/homebrew/bin/node .devlogger/log-server.js &
+    /opt/homebrew/bin/node .devlogger/proxy.js $target_port &
+    
+    sleep 2
+    
+    echo ""
+    echo "🎉 see-me is active!"
+    echo "🌐 Visit: http://localhost:3334"
+    echo "📋 View logs: see-me logs"
+    echo "🛑 Stop: see-me stop"
+    echo ""
+    echo "💡 All browser console output is now automatically captured for agents!"
+}
+
+show_logs() {
+    if [ -f ".devlogger/browser.log" ]; then
+        echo "📋 Browser Console Logs:"
+        echo "======================="
+        cat .devlogger/browser.log
+    else
+        echo "📋 No logs found. Visit http://localhost:3334 to generate logs."
+    fi
+}
+
+show_status() {
+    echo "📊 see-me Status"
+    echo "==============="
+    
+    if [ -d ".devlogger" ]; then
+        echo "📁 Initialized: ✅"
+    else
+        echo "📁 Initialized: ❌ (will auto-initialize on first run)"
+    fi
+    
+    if pgrep -f "log-server.js" >/dev/null; then
+        echo "🌐 Log server: ✅ Running (port 3333)"
+    else
+        echo "🌐 Log server: ❌ Stopped"
+    fi
+    
+    if pgrep -f "proxy.js" >/dev/null; then
+        local proxy_pid=$(pgrep -f "proxy.js")
+        echo "🔄 Proxy server: ✅ Running (port 3334)"
+    else
+        echo "🔄 Proxy server: ❌ Stopped"
+    fi
+    
+    # Show detected project info
+    if [ -f "package.json" ] || [ -f "manage.py" ] || [ -f "requirements.txt" ]; then
+        local project_info=$(detect_project_type 2>/dev/null || echo "unknown|unknown")
+        local project_type=$(echo "$project_info" | cut -d'|' -f1)
+        echo "📦 Project type: $project_type"
+    fi
+    
+    # Show current dev servers
+    echo ""
+    echo "🔍 Running dev servers:"
+    find_running_dev_server >/dev/null 2>&1 || echo "   None detected"
+    
+    if [ -f ".devlogger/browser.log" ]; then
+        local log_count=$(wc -l < .devlogger/browser.log 2>/dev/null || echo 0)
+        echo "📋 Logs captured: $log_count lines"
+    fi
+}
+
+stop_services() {
+    echo "🛑 Stopping see-me services..."
+    pkill -f "log-server.js" 2>/dev/null || true
+    pkill -f "proxy.js" 2>/dev/null || true
+    echo "✅ Services stopped"
+}
+
+# Main execution
+case "${1:-start}" in
+    start|"")
+        start_smart_logging
+        ;;
+    logs)
+        show_logs
+        ;;
+    status)
+        show_status  
+        ;;
+    stop)
+        stop_services
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "❌ Unknown command: $1"
+        echo "   Use 'see-me help' for usage"
+        exit 1
+        ;;
+esac
