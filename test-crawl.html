@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>See-Me Crawl Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .button { 
+            background: #007bff; 
+            color: white; 
+            padding: 10px 20px; 
+            border: none; 
+            border-radius: 5px; 
+            margin: 5px; 
+            cursor: pointer; 
+        }
+        .button:hover { background: #0056b3; }
+        .danger { background: #dc3545; }
+        .nav { margin: 20px 0; }
+        .nav a { margin-right: 15px; padding: 8px 16px; background: #28a745; color: white; text-decoration: none; border-radius: 3px; }
+        .content { margin: 20px 0; padding: 20px; border: 1px solid #ddd; }
+        .error-trigger { background: #ffc107; color: black; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🕷️ See-Me Auto-Crawler Test Page</h1>
+        <p>This page tests the auto-crawler functionality. When crawl mode is active, it should automatically discover and interact with all elements below.</p>
+        
+        <div class="nav">
+            <h3>Navigation Links:</h3>
+            <a href="page2.html">Go to Page 2</a>
+            <a href="page3.html">Go to Page 3</a>
+            <a href="#section1">Jump to Section 1</a>
+            <a href="mailto:test@example.com">Email Link</a>
+            <a href="https://external.com">External Link</a>
+        </div>
+
+        <div class="content">
+            <h3>Interactive Buttons:</h3>
+            <button class="button" onclick="showAlert('Hello from button 1!')">Safe Button 1</button>
+            <button class="button" onclick="showAlert('Hello from button 2!')">Safe Button 2</button>
+            <button class="button error-trigger" onclick="triggerError('TypeError')">Trigger TypeError</button>
+            <button class="button error-trigger" onclick="triggerError('ReferenceError')">Trigger ReferenceError</button>
+            <button class="button danger" onclick="alert('This should be skipped!')">Delete All Data</button>
+            <button class="button danger" onclick="alert('This should be skipped!')">Logout User</button>
+        </div>
+
+        <div class="content">
+            <h3>ARIA Interactive Elements:</h3>
+            <div role="button" tabindex="0" class="button" onclick="showAlert('ARIA button clicked!')">ARIA Button</div>
+            <div class="button" onclick="showAlert('Div button clicked!')">Div Button</div>
+        </div>
+
+        <div class="content">
+            <h3>Form Elements (Should be Skipped):</h3>
+            <form>
+                <input type="text" placeholder="This should be skipped">
+                <button type="submit">Submit (Should be skipped)</button>
+            </form>
+        </div>
+
+        <div class="content" id="section1">
+            <h3>Dynamic Content Area:</h3>
+            <p id="dynamic-content">This content changes when buttons are clicked.</p>
+            <button class="button" onclick="addDynamicButton()">Add New Button</button>
+            <div id="dynamic-buttons"></div>
+        </div>
+
+        <div class="content">
+            <h3>Test Results:</h3>
+            <ul id="test-results"></ul>
+        </div>
+    </div>
+
+    <script>
+        let clickCount = 0;
+        
+        function showAlert(message) {
+            console.log('🖱️ Button clicked:', message);
+            document.getElementById('dynamic-content').textContent = `Button clicked: ${message} (Count: ${++clickCount})`;
+            addTestResult(`✅ Clicked: ${message}`);
+        }
+        
+        function triggerError(errorType) {
+            console.log('🔥 Triggering error:', errorType);
+            addTestResult(`🔥 Triggered: ${errorType}`);
+            
+            if (errorType === 'TypeError') {
+                // This will trigger a TypeError
+                let obj = null;
+                obj.someProperty.value = 'test';
+            } else if (errorType === 'ReferenceError') {
+                // This will trigger a ReferenceError
+                undefinedFunction();
+            }
+        }
+        
+        function addDynamicButton() {
+            const container = document.getElementById('dynamic-buttons');
+            const newButton = document.createElement('button');
+            newButton.className = 'button';
+            newButton.textContent = `Dynamic Button ${container.children.length + 1}`;
+            newButton.onclick = () => showAlert(`Dynamic button ${container.children.length} clicked!`);
+            container.appendChild(newButton);
+            addTestResult('➕ Added dynamic button');
+        }
+        
+        function addTestResult(result) {
+            const results = document.getElementById('test-results');
+            const li = document.createElement('li');
+            li.textContent = `${new Date().toLocaleTimeString()}: ${result}`;
+            results.appendChild(li);
+        }
+        
+        // Add some initial content
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🎯 Test page loaded - waiting for crawler...');
+            addTestResult('📄 Page loaded successfully');
+            
+            // Simulate some async content loading
+            setTimeout(() => {
+                addTestResult('⏰ Async content loaded');
+                console.log('⏰ Async content loaded after 1 second');
+            }, 1000);
+        });
+        
+        // Log when crawler starts (if in crawl mode)
+        if (window.location.search.includes('crawl=true')) {
+            console.log('🕷️ Crawl mode detected - auto-crawler should start in 2 seconds');
+            addTestResult('🕷️ Crawl mode detected');
+        }
+    </script>
+</body>
+</html>

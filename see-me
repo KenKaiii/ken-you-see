@@ -12,25 +12,35 @@ show_help() {
 see-me - Smart Browser Console Logging (v2.2.0)
 
 USAGE:
-    npm run dev & see-me    # One command - auto-detects new server port
-    see-me [PORT]           # Connect to specific port
-    see-me logs             # View captured browser logs  
-    see-me stop             # Stop logging services
-    see-me status           # Show current status
-    see-me version          # Show version information
+    npm run dev & see-me        # Start monitoring - auto-detects new server port
+    see-me crawl                # Run one-time crawl to discover errors (for agents)
+    see-me logs                 # View captured browser logs with agent instructions
+    see-me [PORT]               # Connect to specific port
+    see-me stop                 # Stop logging services
+    see-me status               # Show current status
+    see-me version              # Show version information
 
 WORKFLOWS:
-    # Method 1: Single command (recommended)
-    npm run dev & see-me    # Automatically detects the port from new server
+    # Development: Start monitoring
+    npm run dev & see-me        # Automatically detects the port from new server
     
-    # Method 2: Explicit port
-    see-me 8080             # Connect to port 8080 specifically
+    # Agent workflow: Error discovery and fixing
+    see-me logs                 # View current errors with agent instructions
+    # Agent fixes errors in code
+    see-me crawl                # Triggers fresh crawl to discover remaining errors
+    see-me logs                 # View updated results (fewer errors after fixes)
+    
+    # Explicit port
+    see-me 8080                 # Connect to port 8080 specifically
 
 FEATURES:
     ✅ Detects newly started dev servers automatically
     ✅ Works with any framework (React, Django, Python, Node, etc.)
     ✅ Browser console log capture with proxy injection
-    ✅ Agent-readable log files
+    ✅ Agent-controlled crawling: tests all interactive elements on command
+    ✅ Smart error deduplication with occurrence counts
+    ✅ Session-based log separation for clean agent context
+    ✅ Agent-readable log files with clear instructions
 
 EXAMPLE:
     npm run dev & see-me
@@ -286,6 +296,93 @@ initialize_logging() {
         addLog('error', [`Unhandled Promise Rejection: ${e.reason}`]);
     });
     
+    // Poll for one-time crawl triggers from agent
+    let lastCrawlCheck = 0;
+    setInterval(() => {
+        fetch('http://localhost:3333/session')
+            .then(response => response.text())
+            .then(sessionId => {
+                // If session changed, it means crawl was triggered
+                if (sessionId !== currentSessionId && sessionId > lastCrawlCheck) {
+                    lastCrawlCheck = Date.now();
+                    originalConsole.log('🕷️ One-time crawl triggered by agent');
+                    setTimeout(() => {
+                        startAutoCrawler();
+                    }, 1000); // Brief delay for page stability
+                }
+            })
+            .catch(() => {}); // Ignore network errors
+    }, 2000); // Check every 2 seconds
+    
+    function startAutoCrawler() {
+        const visitedElements = new Set();
+        const visitedUrls = new Set([window.location.href]);
+        
+        function findInteractiveElements() {
+            const selectors = [
+                'a[href]:not([href^="mailto:"]):not([href^="tel:"]):not([href^="#"])',
+                'button:not([type="submit"])',
+                '[onclick]',
+                '[role="button"]',
+                '.btn:not(form .btn)',
+                '.button:not(form .button)',
+                '[tabindex="0"]:not(input):not(textarea)'
+            ];
+            
+            const elements = [];
+            selectors.forEach(selector => {
+                document.querySelectorAll(selector).forEach(el => {
+                    // Skip if inside form or has dangerous text
+                    const text = el.textContent.toLowerCase();
+                    const dangerousWords = ['delete', 'remove', 'logout', 'sign out', 'clear all'];
+                    if (el.closest('form') || dangerousWords.some(word => text.includes(word))) {
+                        return;
+                    }
+                    
+                    const elementId = el.tagName + (el.href || el.onclick || el.textContent.slice(0, 20));
+                    if (!visitedElements.has(elementId)) {
+                        elements.push({ element: el, id: elementId });
+                    }
+                });
+            });
+            return elements;
+        }
+        
+        function crawlInteractiveElements() {
+            const elements = findInteractiveElements();
+            if (elements.length === 0) return;
+            
+            originalConsole.log(\`🔍 Auto-crawler found \${elements.length} interactive elements\`);
+            
+            elements.forEach(({ element, id }, index) => {
+                setTimeout(() => {
+                    visitedElements.add(id);
+                    
+                    try {
+                        if (element.tagName === 'A' && element.href) {
+                            // For links, check if same origin
+                            const url = new URL(element.href, window.location.origin);
+                            if (url.origin === window.location.origin && !visitedUrls.has(url.href)) {
+                                visitedUrls.add(url.href);
+                                originalConsole.log(\`🔗 Auto-crawl: Navigating to \${url.pathname}\`);
+                                window.location.href = url.href;
+                                return;
+                            }
+                        } else {
+                            // For buttons and other interactive elements
+                            originalConsole.log(\`🖱️ Auto-crawl: Clicking \${element.tagName} - "\${element.textContent.slice(0, 30)}"\`);
+                            element.click();
+                        }
+                    } catch (error) {
+                        addLog('error', [\`Auto-crawler error on \${element.tagName}:\`, error]);
+                    }
+                }, index * 500); // Stagger interactions
+            });
+        }
+        
+        crawlInteractiveElements();
+    }
+    
     // Silent activation - no noise in logs
 })();
 EOF
@@ -379,6 +476,11 @@ const server = http.createServer((req, res) => {
     } else if (req.method === 'GET' && req.url === '/session') {
         res.writeHead(200, {'Content-Type': 'text/plain'});
         res.end(sessionStartTime.toString());
+    } else if (req.method === 'POST' && req.url === '/trigger-crawl') {
+        // Trigger one-time crawl by broadcasting to all connected browsers
+        console.log('🕷️ One-time crawl triggered via API');
+        res.writeHead(200, {'Content-Type': 'application/json'});
+        res.end(JSON.stringify({success: true, message: 'Crawl triggered'}));
     } else {
         res.writeHead(404);
         res.end('Not found');
@@ -487,6 +589,7 @@ detect_newly_started_server() {
 
 start_smart_logging() {
     local explicit_port="$1"
+    local crawl_mode="$2"
     initialize_logging
     
     local target_port
@@ -558,11 +661,20 @@ show_logs() {
         
         if [ -n "$latest_session" ]; then
             # Show only logs from current session, clean format
-            grep "SESSION:$latest_session" .devlogger/browser.log | sed 's/SESSION:[0-9]*|//' | sed 's/ðŸ"/🔍/g' | sed 's/ðŸ"„/🔄/g' 2>/dev/null || echo "No logs from current session yet."
+            local logs=$(grep "SESSION:$latest_session" .devlogger/browser.log | sed 's/SESSION:[0-9]*|//' | sed 's/ðŸ"/🔍/g' | sed 's/ðŸ"„/🔄/g' 2>/dev/null)
+            if [ -n "$logs" ]; then
+                echo "$logs"
+            else
+                echo "No logs from current session yet."
+            fi
         else
             # Fallback: show recent logs, clean format  
             tail -20 .devlogger/browser.log | sed 's/ðŸ"/🔍/g' | sed 's/ðŸ"„/🔄/g' 2>/dev/null || echo "No logs found."
         fi
+        
+        echo ""
+        echo "💡 Agent Instructions:"
+        echo "After fixing errors, run 'see-me crawl' to refresh the browser and discover remaining issues."
     else
         echo "📋 No logs found. Visit http://localhost:3334 to generate logs."
     fi
@@ -621,10 +733,38 @@ show_version() {
     echo "Smart Browser Console Logging for Coding Agents"
 }
 
+run_one_time_crawl() {
+    # Check if see-me services are running
+    if ! curl -s http://localhost:3333/session >/dev/null 2>&1; then
+        echo "❌ see-me services not running. Start with: npm run dev & see-me"
+        return 1
+    fi
+    
+    echo "🔄 Triggering browser refresh and crawl..."
+    
+    # Clear current session to trigger fresh crawl
+    curl -s -X POST http://localhost:3333/clear-logs -H "Content-Type: application/json" -d '{"clear": true}' >/dev/null 2>&1
+    
+    # Send crawl trigger to browser via a special endpoint
+    curl -s -X POST http://localhost:3333/trigger-crawl >/dev/null 2>&1
+    
+    echo "⏳ Crawling in progress... (waiting 8 seconds for completion)"
+    sleep 8
+    
+    echo ""
+    echo "📋 Fresh Crawl Results:"
+    echo "======================="
+    show_logs
+}
+
 # Main execution
 case "${1:-start}" in
     start|"")
         start_smart_logging
+        ;;
+    crawl)
+        echo "🕷️ Running one-time crawl to discover errors..."
+        run_one_time_crawl
         ;;
     logs)
         show_logs
@@ -649,6 +789,7 @@ case "${1:-start}" in
         echo "❌ Unknown command: $1"
         echo "   Use 'see-me help' for usage"
         echo "   Or specify a port: see-me [PORT]"
+        echo "   Or use: see-me crawl"
         exit 1
         ;;
 esac

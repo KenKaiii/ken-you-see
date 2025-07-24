@@ -6,6 +6,8 @@ const PORT = 3333;
 const LOG_FILE = path.join(__dirname, 'browser.log');
 
 let sessionStartTime = Date.now();
+let logCache = new Map(); // For deduplication
+let logFileLines = []; // Track log file contents for replacement
 
 const server = http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -25,9 +27,11 @@ const server = http.createServer((req, res) => {
             try {
                 const data = JSON.parse(body);
                 
-                // New session started - update timestamp
+                // New session started - update timestamp and clear cache
                 if (data.clear === true) {
                     sessionStartTime = Date.now();
+                    logCache.clear(); // Reset deduplication for new session
+                    logFileLines = []; // Reset file tracking
                     console.log('🔄 New session started - timestamp updated');
                 }
                 
@@ -44,8 +48,33 @@ const server = http.createServer((req, res) => {
         req.on('end', () => {
             try {
                 const log = JSON.parse(body);
-                const logLine = `SESSION:${sessionStartTime}|[${log.timestamp}] BROWSER ${log.level}: ${log.message}\n`;
-                fs.appendFileSync(LOG_FILE, logLine);
+                const logKey = `${log.level}:${log.message}`;
+                
+                // Server-side deduplication with counts
+                if (logCache.has(logKey)) {
+                    const existing = logCache.get(logKey);
+                    existing.count++;
+                    existing.lastSeen = log.timestamp;
+                    
+                    // Find and update the existing line
+                    const lineIndex = logFileLines.findIndex(line => line.includes(log.message) && line.includes(log.level));
+                    const newLine = `SESSION:${sessionStartTime}|[${existing.lastSeen}] BROWSER ${log.level}: ${log.message} (seen ${existing.count} times)`;
+                    
+                    if (lineIndex >= 0) {
+                        logFileLines[lineIndex] = newLine;
+                    } else {
+                        logFileLines.push(newLine);
+                    }
+                } else {
+                    // First time seeing this log
+                    logCache.set(logKey, { count: 1, lastSeen: log.timestamp });
+                    const newLine = `SESSION:${sessionStartTime}|[${log.timestamp}] BROWSER ${log.level}: ${log.message}`;
+                    logFileLines.push(newLine);
+                }
+                
+                // Rewrite entire file with deduplicated lines
+                fs.writeFileSync(LOG_FILE, logFileLines.join('\n') + '\n');
+                
                 res.writeHead(200, {'Content-Type': 'application/json'});
                 res.end(JSON.stringify({success: true}));
             } catch (err) {

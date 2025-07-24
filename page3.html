@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Page 3</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; margin: 5px; cursor: pointer; }
+        .nav a { margin-right: 15px; padding: 8px 16px; background: #28a745; color: white; text-decoration: none; border-radius: 3px; }
+        .error { background: #dc3545; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Test Page 3</h1>
+        <div class="nav">
+            <a href="test-crawl.html">Back to Home</a>
+            <a href="page2.html">Go to Page 2</a>
+        </div>
+        
+        <h3>Page 3 Advanced Testing:</h3>
+        <button class="button" onclick="simulateApiCall()">Simulate API Call</button>
+        <button class="button error" onclick="triggerAsyncError()">Async Error</button>
+        <button class="button" onclick="createElements()">Create Dynamic Elements</button>
+        
+        <div id="dynamic-area"></div>
+        
+        <script>
+            function simulateApiCall() {
+                console.log('📡 Simulating API call...');
+                fetch('/nonexistent-endpoint')
+                    .then(response => response.json())
+                    .catch(error => {
+                        console.error('API call failed:', error);
+                    });
+            }
+            
+            function triggerAsyncError() {
+                console.log('⏰ Triggering async error...');
+                setTimeout(() => {
+                    throw new Error('Async error from Page 3!');
+                }, 500);
+            }
+            
+            function createElements() {
+                const area = document.getElementById('dynamic-area');
+                for (let i = 1; i <= 3; i++) {
+                    const btn = document.createElement('button');
+                    btn.className = 'button';
+                    btn.textContent = `Dynamic Button ${i}`;
+                    btn.onclick = () => console.log(`Dynamic button ${i} clicked`);
+                    area.appendChild(btn);
+                }
+                console.log('➕ Created 3 dynamic buttons');
+            }
+            
+            console.log('🚀 Page 3 loaded');
+            
+            // Automatically trigger some errors for testing
+            setTimeout(() => {
+                console.log('Auto-triggering test error on Page 3');
+                try {
+                    undefinedVariable.property = 'test';
+                } catch (e) {
+                    console.error('Caught error:', e.message);
+                }
+            }, 3000);
+        </script>
+    </div>
+</body>
+</html>

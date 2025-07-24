@@ -16,15 +16,43 @@
     }).then(response => response.json())
       .then(data => {
           currentSessionId = data.sessionStart;
-          console.log('🔄 New session started:', currentSessionId);
+          // Session started silently
       }).catch(() => {
           currentSessionId = Date.now(); // Fallback
       });
     
     function addLog(level, args) {
-        const message = args.map(arg => 
-            typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
-        ).join(' ');
+        const message = args.map(arg => {
+            if (typeof arg === 'object') {
+                if (arg === null) return 'null';
+                if (arg instanceof Error) {
+                    return `${arg.name}: ${arg.message}${arg.stack ? '\n' + arg.stack : ''}`;
+                }
+                try {
+                    const jsonStr = JSON.stringify(arg, null, 2);
+                    // If JSON.stringify returns {}, try to extract properties manually
+                    if (jsonStr === '{}' && arg.constructor && arg.constructor.name) {
+                        const props = [];
+                        for (let key in arg) {
+                            try {
+                                props.push(`${key}: ${arg[key]}`);
+                            } catch (e) {}
+                        }
+                        // Also try common Error properties
+                        if (arg.name) props.push(`name: "${arg.name}"`);
+                        if (arg.message) props.push(`message: "${arg.message}"`);
+                        if (props.length > 0) {
+                            return `{${props.join(', ')}}`;
+                        }
+                        return `[${arg.constructor.name} object]`;
+                    }
+                    return jsonStr;
+                } catch (e) {
+                    return `[Object: ${Object.prototype.toString.call(arg)}]`;
+                }
+            }
+            return String(arg);
+        }).join(' ');
         
         const timestamp = new Date().toISOString();
         
@@ -62,5 +90,81 @@
         addLog('error', [`Unhandled Promise Rejection: ${e.reason}`]);
     });
     
-    console.log('🔍 see-me active - console output being captured');
+    // Auto-crawler for comprehensive error discovery
+    if (window.location.search.includes('crawl=true')) {
+        setTimeout(() => {
+            startAutoCrawler();
+        }, 2000); // Wait for page to stabilize
+    }
+    
+    function startAutoCrawler() {
+        const visitedElements = new Set();
+        const visitedUrls = new Set([window.location.href]);
+        
+        function findInteractiveElements() {
+            const selectors = [
+                'a[href]:not([href^="mailto:"]):not([href^="tel:"]):not([href^="#"])',
+                'button:not([type="submit"])',
+                '[onclick]',
+                '[role="button"]',
+                '.btn:not(form .btn)',
+                '.button:not(form .button)',
+                '[tabindex="0"]:not(input):not(textarea)'
+            ];
+            
+            const elements = [];
+            selectors.forEach(selector => {
+                document.querySelectorAll(selector).forEach(el => {
+                    // Skip if inside form or has dangerous text
+                    const text = el.textContent.toLowerCase();
+                    const dangerousWords = ['delete', 'remove', 'logout', 'sign out', 'clear all'];
+                    if (el.closest('form') || dangerousWords.some(word => text.includes(word))) {
+                        return;
+                    }
+                    
+                    const elementId = el.tagName + (el.href || el.onclick || el.textContent.slice(0, 20));
+                    if (!visitedElements.has(elementId)) {
+                        elements.push({ element: el, id: elementId });
+                    }
+                });
+            });
+            return elements;
+        }
+        
+        function crawlInteractiveElements() {
+            const elements = findInteractiveElements();
+            if (elements.length === 0) return;
+            
+            originalConsole.log(\`🔍 Auto-crawler found \${elements.length} interactive elements\`);
+            
+            elements.forEach(({ element, id }, index) => {
+                setTimeout(() => {
+                    visitedElements.add(id);
+                    
+                    try {
+                        if (element.tagName === 'A' && element.href) {
+                            // For links, check if same origin
+                            const url = new URL(element.href, window.location.origin);
+                            if (url.origin === window.location.origin && !visitedUrls.has(url.href)) {
+                                visitedUrls.add(url.href);
+                                originalConsole.log(\`🔗 Auto-crawl: Navigating to \${url.pathname}\`);
+                                window.location.href = url.href;
+                                return;
+                            }
+                        } else {
+                            // For buttons and other interactive elements
+                            originalConsole.log(\`🖱️ Auto-crawl: Clicking \${element.tagName} - "\${element.textContent.slice(0, 30)}"\`);
+                            element.click();
+                        }
+                    } catch (error) {
+                        addLog('error', [\`Auto-crawler error on \${element.tagName}:\`, error]);
+                    }
+                }, index * 500); // Stagger interactions
+            });
+        }
+        
+        crawlInteractiveElements();
+    }
+    
+    // Silent activation - no noise in logs
 })();
