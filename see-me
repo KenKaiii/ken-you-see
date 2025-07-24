@@ -413,7 +413,7 @@ initialize_logging() {
 EOF
 
         # Create log server (same as before)
-        cat > .devlogger/log-server.js << 'EOF'
+        cat > .devlogger/log-server.cjs << 'EOF'
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -518,7 +518,7 @@ server.listen(PORT, () => {
 EOF
 
         # Create smart proxy
-        cat > .devlogger/proxy.js << 'EOF'
+        cat > .devlogger/proxy.cjs << 'EOF'
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -773,10 +773,10 @@ start_smart_logging() {
     stop_services >/dev/null 2>&1
     
     # Start services and capture PIDs
-    node .devlogger/log-server.js &
+    node .devlogger/log-server.cjs &
     echo $! > .devlogger/log-server.pid
     
-    node .devlogger/proxy.js $target_port &
+    node .devlogger/proxy.cjs $target_port &
     echo $! > .devlogger/proxy.pid
     
     sleep 2
@@ -862,8 +862,8 @@ show_status() {
             echo -e "🌐 Log server: \033[1;31m❌ Stopped (stale PID file)\033[0m"
             rm -f .devlogger/log-server.pid
         fi
-    elif pgrep -f "log-server.js" >/dev/null; then
-        local log_pid=$(pgrep -f "log-server.js")
+    elif pgrep -f "log-server.cjs" >/dev/null; then
+        local log_pid=$(pgrep -f "log-server.cjs")
         echo -e "🌐 Log server: \033[1;33m⚠️  Running (port 3333, PID: $log_pid, no PID file)\033[0m"
     else
         echo -e "🌐 Log server: \033[1;31m❌ Stopped\033[0m"
@@ -878,8 +878,8 @@ show_status() {
             echo -e "🔄 Proxy server: \033[1;31m❌ Stopped (stale PID file)\033[0m"
             rm -f .devlogger/proxy.pid
         fi
-    elif pgrep -f "proxy.js" >/dev/null; then
-        local proxy_pid=$(pgrep -f "proxy.js")
+    elif pgrep -f "proxy.cjs" >/dev/null; then
+        local proxy_pid=$(pgrep -f "proxy.cjs")
         echo -e "🔄 Proxy server: \033[1;33m⚠️  Running (port 3334, PID: $proxy_pid, no PID file)\033[0m"
     else
         echo -e "🔄 Proxy server: \033[1;31m❌ Stopped\033[0m"
@@ -940,11 +940,11 @@ stop_services() {
     # Fallback: use pattern matching if PID files didn't work
     if [ $stopped_count -eq 0 ]; then
         echo "   🔍 No PID files found, using pattern matching..."
-        if pkill -f "log-server.js" 2>/dev/null; then
+        if pkill -f "log-server.cjs" 2>/dev/null; then
             echo "   ✅ Log server stopped (pattern match)"
             stopped_count=$((stopped_count + 1))
         fi
-        if pkill -f "proxy.js" 2>/dev/null; then
+        if pkill -f "proxy.cjs" 2>/dev/null; then
             echo "   ✅ Proxy server stopped (pattern match)"
             stopped_count=$((stopped_count + 1))
         fi
