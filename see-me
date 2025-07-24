@@ -3,7 +3,7 @@
 # see-me - Intelligent Browser Console Logging
 # Auto-detects project type and running dev servers
 # Usage: npm run dev & see-me
-# Version: 2.2.0
+# Version: 2.3.0
 
 set -e
 
@@ -30,7 +30,7 @@ cleanup_stale_pids() {
 
 show_help() {
     cat << EOF
-see-me - Smart Browser Console Logging (v2.2.0)
+see-me - Smart Browser Console Logging (v2.3.0)
 
 USAGE:
     npm run dev & see-me        # Start monitoring - auto-detects new server port
@@ -958,7 +958,7 @@ stop_services() {
 }
 
 show_version() {
-    echo "see-me version 2.2.0"
+    echo "see-me version 2.3.0"
     echo "Smart Browser Console Logging for Coding Agents"
 }
 
