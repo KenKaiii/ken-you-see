@@ -565,25 +565,44 @@ detect_newly_started_server() {
     # Wait a moment for backgrounded command to start
     sleep 2
     
-    # Simple approach - find any python with http.server or similar
-    local simple_match=$(ps -eo pid,args | grep -E "(Python.*-m.*http\.server|python.*-m.*http\.server|python.*http\.server)" | grep -v grep | head -1)
-    if [ -n "$simple_match" ]; then
-        local pid=$(echo "$simple_match" | awk '{print $1}')
-        local listening_ports=$(lsof -Pan -p "$pid" -i 2>/dev/null | grep LISTEN | awk -F: '{print $2}' | awk '{print $1}' | sort -u)
-        
-        if [ -n "$listening_ports" ]; then
-            for port in $listening_ports; do
-                if lsof -i :$port >/dev/null 2>&1; then
-                    local process_name=$(ps -p "$pid" -o comm= 2>/dev/null)
-                    echo "   ✅ Found $process_name server on port $port (PID: $pid)" >&2
-                    echo "$port"
-                    return 0
-                fi
-            done
-        fi
+    # Look for Node.js dev servers (live-server, vite, next, etc.)
+    local node_servers=$(ps -eo pid,args | grep -E "(node.*live-server|node.*vite|node.*next|node.*webpack|node.*dev-server)" | grep -v grep)
+    
+    if [ -n "$node_servers" ]; then
+        while IFS= read -r server_line; do
+            local pid=$(echo "$server_line" | awk '{print $1}')
+            local listening_ports=$(lsof -Pan -p "$pid" -i 2>/dev/null | grep LISTEN | awk -F: '{print $2}' | awk '{print $1}' | sort -u)
+            
+            if [ -n "$listening_ports" ]; then
+                for port in $listening_ports; do
+                    if lsof -i :$port >/dev/null 2>&1; then
+                        local process_name=$(ps -p "$pid" -o comm= 2>/dev/null || echo "node")
+                        echo "   ✅ Found $process_name server on port $port (PID: $pid)" >&2
+                        echo "$port"
+                        return 0
+                    fi
+                done
+            fi
+        done <<< "$node_servers"
     fi
     
-    echo "   ❌ No dev server detected" >&2
+    # Fallback: look for any node process on common dev ports
+    local common_ports=(3000 5173 8080 8000 3001 4000 5500)
+    for port in "${common_ports[@]}"; do
+        if lsof -i :$port >/dev/null 2>&1; then
+            local process_info=$(lsof -i :$port | tail -1)
+            local process_name=$(echo "$process_info" | awk '{print $1}')
+            
+            if [ "$process_name" = "node" ]; then
+                local pid=$(echo "$process_info" | awk '{print $2}')
+                echo "   ✅ Found node server on port $port (PID: $pid)" >&2
+                echo "$port"
+                return 0
+            fi
+        fi
+    done
+    
+    echo "   ❌ No Node.js dev server detected" >&2
     return 1
 }
 
@@ -664,7 +683,7 @@ show_logs() {
             local logs=$(grep "SESSION:$latest_session" .devlogger/browser.log | sed 's/SESSION:[0-9]*|//' | sed 's/ðŸ"/🔍/g' | sed 's/ðŸ"„/🔄/g' 2>/dev/null)
             if [ -n "$logs" ]; then
                 echo "$logs"
-                local error_count=$(echo "$logs" | grep -c "ERROR" || echo "0")
+                local error_count=$(echo "$logs" | grep -c "ERROR")
                 if [ $error_count -gt 0 ]; then
                     echo ""
                     echo -e "\033[1;31m🚨 Found $error_count error(s) that need fixing\033[0m"
