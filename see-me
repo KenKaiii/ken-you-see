@@ -773,10 +773,10 @@ start_smart_logging() {
     stop_services >/dev/null 2>&1
     
     # Start services and capture PIDs
-    /opt/homebrew/bin/node .devlogger/log-server.js &
+    node .devlogger/log-server.js &
     echo $! > .devlogger/log-server.pid
     
-    /opt/homebrew/bin/node .devlogger/proxy.js $target_port &
+    node .devlogger/proxy.js $target_port &
     echo $! > .devlogger/proxy.pid
     
     sleep 2
