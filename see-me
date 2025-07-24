@@ -7,6 +7,27 @@
 
 set -e
 
+# Unified detection patterns for consistency across all functions
+readonly NODE_SERVER_PATTERNS="(node.*live-server|node.*vite|node.*next|node.*webpack|node.*dev-server)"
+readonly GO_SERVER_PATTERNS="(go run|air|\.\/[a-zA-Z0-9_-]+$|\.\/main$|[a-zA-Z0-9_-]+\.exe$|\.\/[a-zA-Z0-9_-]*server[a-zA-Z0-9_-]*$)"
+readonly DEV_SERVER_PROCESS_NAMES="node|go|main|python*|Python*|ruby|Rails|php|nginx|http-server|webpack*|vite|next*|live-server"
+readonly COMMON_DEV_PORTS=(3000 5173 8080 8000 3001 4000 5500 9000)
+
+# Cleanup stale PID files on startup
+cleanup_stale_pids() {
+    if [ -d ".devlogger" ]; then
+        for pid_file in .devlogger/*.pid; do
+            if [ -f "$pid_file" ]; then
+                local pid=$(cat "$pid_file" 2>/dev/null)
+                if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+                    # Process is dead, remove stale PID file
+                    rm -f "$pid_file"
+                fi
+            fi
+        done
+    fi
+}
+
 show_help() {
     cat << EOF
 see-me - Smart Browser Console Logging (v2.2.0)
@@ -77,6 +98,11 @@ detect_project_type() {
             expected_port="3000"
         fi
         
+    # Check for Go projects
+    elif [ -f "go.mod" ] || [ -f "go.sum" ] || [ -f "main.go" ]; then
+        project_type="Go"
+        expected_port="8080"
+        
     # Check for Python projects
     elif [ -f "manage.py" ] || [ -f "requirements.txt" ]; then
         if [ -f "manage.py" ]; then
@@ -109,17 +135,16 @@ detect_project_type() {
 find_safe_dev_servers() {
     echo "🔍 Scanning for development servers..." >&2
     
-    # Common dev server ports (ordered by priority)
-    local common_ports=(3000 8000 9999 3001 3002 5173 8080 8888 9000 4000 5500)
+    # Use unified common dev server ports
     local dev_servers=()
     
-    for port in "${common_ports[@]}"; do
+    for port in "${COMMON_DEV_PORTS[@]}"; do
         if lsof -i :$port >/dev/null 2>&1; then
             local process_name=$(lsof -i :$port | tail -1 | awk '{print $1}')
             
             # Only include processes that are clearly dev servers
             case "$process_name" in
-                node|Node|python*|Python*|ruby|Rails|php|nginx|http-server|webpack*|vite|next*|live-server)
+                $DEV_SERVER_PROCESS_NAMES)
                     echo "   ✅ Port $port: $process_name (dev server)" >&2
                     dev_servers+=("$port")
                     ;;
@@ -488,7 +513,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-    console.log(`🌐 see-me log server running on http://localhost:${PORT}`);
+    // Log server started silently
 });
 EOF
 
@@ -502,7 +527,7 @@ const PROXY_PORT = 3334;
 const TARGET_PORT = process.argv[2] || 3000;
 const CONSOLE_SCRIPT = fs.readFileSync(path.join(__dirname, 'console-wrapper.js'), 'utf8');
 
-console.log(`🔄 Smart proxy: localhost:${PROXY_PORT} → localhost:${TARGET_PORT}`);
+// Proxy server started silently
 
 const server = http.createServer((req, res) => {
     const proxyReq = http.request({
@@ -545,17 +570,17 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PROXY_PORT, () => {
-    console.log(`🌐 Visit http://localhost:${PROXY_PORT} (instead of localhost:${TARGET_PORT})`);
+    // Proxy ready - see-me will show the URL
 });
 EOF
 
         echo "✅ Browser logging initialized!"
     else
-        echo "🔧 Using existing browser logging setup..."
+        # Using existing setup - no output needed
+        true
     fi
     
     # Always start with fresh logs for new development session
-    echo "🗑️  Clearing previous browser logs for fresh session..."
     > .devlogger/browser.log
 }
 
@@ -566,7 +591,7 @@ detect_newly_started_server() {
     sleep 2
     
     # Look for Node.js dev servers (live-server, vite, next, etc.)
-    local node_servers=$(ps -eo pid,args | grep -E "(node.*live-server|node.*vite|node.*next|node.*webpack|node.*dev-server)" | grep -v grep)
+    local node_servers=$(ps -eo pid,args | grep -E "$NODE_SERVER_PATTERNS" | grep -v grep)
     
     if [ -n "$node_servers" ]; then
         while IFS= read -r server_line; do
@@ -586,8 +611,8 @@ detect_newly_started_server() {
         done <<< "$node_servers"
     fi
     
-    # Look for Go dev servers (go run, compiled binaries)
-    local go_servers=$(ps -eo pid,args | grep -E "(go.*run.*\.go|\.\/[a-zA-Z0-9_-]+$|\.\/main$)" | grep -v grep)
+    # Look for Go dev servers (go run, compiled binaries, Go dev tools)
+    local go_servers=$(ps -eo pid,args | grep -E "$GO_SERVER_PATTERNS" | grep -v grep)
     
     if [ -n "$go_servers" ]; then
         while IFS= read -r server_line; do
@@ -607,19 +632,32 @@ detect_newly_started_server() {
         done <<< "$go_servers"
     fi
     
-    # Fallback: look for any node or go process on common dev ports
-    local common_ports=(3000 5173 8080 8000 3001 4000 5500 9000)
+    # Fallback: look for any dev server process on common dev ports
+    local common_ports=(${COMMON_DEV_PORTS[@]})
     for port in "${common_ports[@]}"; do
         if lsof -i :$port >/dev/null 2>&1; then
             local process_info=$(lsof -i :$port | tail -1)
             local process_name=$(echo "$process_info" | awk '{print $1}')
             
-            if [ "$process_name" = "node" ] || [ "$process_name" = "go" ] || [ "$process_name" = "main" ]; then
-                local pid=$(echo "$process_info" | awk '{print $2}')
-                echo "   ✅ Found $process_name server on port $port (PID: $pid)" >&2
-                echo "$port"
-                return 0
-            fi
+            # Check for common dev server processes
+            case "$process_name" in
+                node|go|main|python*|Python*|ruby|Rails|php|nginx|http-server|webpack*|vite|next*|live-server)
+                    local pid=$(echo "$process_info" | awk '{print $2}')
+                    echo "   ✅ Found $process_name server on port $port (PID: $pid)" >&2
+                    echo "$port"
+                    return 0
+                    ;;
+                *)
+                    # Check if it's a compiled binary that might be a Go server
+                    local full_process=$(ps -p "$(echo "$process_info" | awk '{print $2}')" -o args= 2>/dev/null || echo "")
+                    if [[ "$full_process" == *"go run"* ]] || [[ "$full_process" == "./"* ]]; then
+                        local pid=$(echo "$process_info" | awk '{print $2}')
+                        echo "   ✅ Found $process_name server on port $port (PID: $pid)" >&2
+                        echo "$port"
+                        return 0
+                    fi
+                    ;;
+            esac
         fi
     done
     
@@ -627,9 +665,84 @@ detect_newly_started_server() {
     return 1
 }
 
+find_running_dev_server() {
+    # Look for Node.js dev servers (live-server, vite, next, etc.)
+    local node_servers=$(ps -eo pid,args | grep -E "$NODE_SERVER_PATTERNS" | grep -v grep)
+    
+    if [ -n "$node_servers" ]; then
+        while IFS= read -r server_line; do
+            local pid=$(echo "$server_line" | awk '{print $1}')
+            local listening_ports=$(lsof -Pan -p "$pid" -i 2>/dev/null | grep LISTEN | awk -F: '{print $2}' | awk '{print $1}' | sort -u)
+            
+            if [ -n "$listening_ports" ]; then
+                for port in $listening_ports; do
+                    if lsof -i :$port >/dev/null 2>&1; then
+                        local process_name=$(ps -p "$pid" -o comm= 2>/dev/null || echo "node")
+                        echo "   ✅ $process_name server on port $port (PID: $pid)"
+                        return 0
+                    fi
+                done
+            fi
+        done <<< "$node_servers"
+    fi
+    
+    # Look for Go dev servers (go run, compiled binaries, Go dev tools)
+    local go_servers=$(ps -eo pid,args | grep -E "$GO_SERVER_PATTERNS" | grep -v grep)
+    
+    if [ -n "$go_servers" ]; then
+        while IFS= read -r server_line; do
+            local pid=$(echo "$server_line" | awk '{print $1}')
+            local listening_ports=$(lsof -Pan -p "$pid" -i 2>/dev/null | grep LISTEN | awk -F: '{print $2}' | awk '{print $1}' | sort -u)
+            
+            if [ -n "$listening_ports" ]; then
+                for port in $listening_ports; do
+                    if lsof -i :$port >/dev/null 2>&1; then
+                        local process_name=$(ps -p "$pid" -o comm= 2>/dev/null || echo "go")
+                        echo "   ✅ $process_name server on port $port (PID: $pid)"
+                        return 0
+                    fi
+                done
+            fi
+        done <<< "$go_servers"
+    fi
+    
+    # Fallback: look for any dev server process on common dev ports
+    local common_ports=(${COMMON_DEV_PORTS[@]})
+    for port in "${common_ports[@]}"; do
+        if lsof -i :$port >/dev/null 2>&1; then
+            local process_info=$(lsof -i :$port | tail -1)
+            local process_name=$(echo "$process_info" | awk '{print $1}')
+            
+            # Check for common dev server processes
+            case "$process_name" in
+                node|go|main|python*|Python*|ruby|Rails|php|nginx|http-server|webpack*|vite|next*|live-server)
+                    local pid=$(echo "$process_info" | awk '{print $2}')
+                    echo "   ✅ $process_name server on port $port (PID: $pid)"
+                    return 0
+                    ;;
+                *)
+                    # Check if it's a compiled binary that might be a Go server
+                    local full_process=$(ps -p "$(echo "$process_info" | awk '{print $2}')" -o args= 2>/dev/null || echo "")
+                    if [[ "$full_process" == *"go run"* ]] || [[ "$full_process" == "./"* ]]; then
+                        local pid=$(echo "$process_info" | awk '{print $2}')
+                        echo "   ✅ $process_name server on port $port (PID: $pid)"
+                        return 0
+                    fi
+                    ;;
+            esac
+        fi
+    done
+    
+    return 1
+}
+
 start_smart_logging() {
     local explicit_port="$1"
     local crawl_mode="$2"
+    
+    # Clean up any stale PID files from previous runs
+    cleanup_stale_pids
+    
     initialize_logging
     
     local target_port
@@ -654,31 +767,31 @@ start_smart_logging() {
         fi
     fi
     
-    echo ""
-    echo "🚀 Starting smart browser logging for port $target_port..."
+    echo -e "\n🚀 Starting browser logging for port $target_port..."
     
-    # Stop any existing services
-    pkill -f "log-server.js" 2>/dev/null || true
-    pkill -f "proxy.js" 2>/dev/null || true
+    # Stop any existing services using improved cleanup
+    stop_services >/dev/null 2>&1
     
-    # Start services
+    # Start services and capture PIDs
     /opt/homebrew/bin/node .devlogger/log-server.js &
+    echo $! > .devlogger/log-server.pid
+    
     /opt/homebrew/bin/node .devlogger/proxy.js $target_port &
+    echo $! > .devlogger/proxy.pid
     
     sleep 2
     
     echo ""
-    echo "🎉 see-me is active!"
-    echo "🌐 Visit: http://localhost:3334"
-    echo "📋 View logs: see-me logs (in another terminal)"
-    echo "🛑 Stop: see-me stop (or Ctrl+C)"
+    echo -e "\033[1;32m✅ see-me active on port $target_port\033[0m"
     echo ""
-    echo "💡 All browser console output is now automatically captured for agents!"
+    echo -e "\033[1;36m👆 CLICK:\033[0m \033[1;4;34mhttp://localhost:3334\033[0m"
+    echo -e "\033[1;33m📋 LOGS:\033[0m \033[1msee-me logs\033[0m"
+    echo -e "\033[1;31m🛑 STOP:\033[0m \033[1msee-me stop\033[0m"
     echo ""
-    echo "🔍 Monitoring... (Press Ctrl+C to stop)"
+    echo -e "\033[2m🔍 Monitoring... (Press Ctrl+C to stop)\033[0m"
     
     # Keep running and show live log updates
-    trap 'echo ""; echo "🛑 Stopping see-me..."; pkill -f "log-server.js" 2>/dev/null || true; pkill -f "proxy.js" 2>/dev/null || true; exit 0' INT
+    trap 'echo ""; stop_services; exit 0' INT
     
     # Follow logs if they exist, otherwise just wait
     if [ -f ".devlogger/browser.log" ]; then
@@ -740,15 +853,34 @@ show_status() {
         echo -e "📁 Initialized: \033[1;33m❌ (will auto-initialize on first run)\033[0m"
     fi
     
-    if pgrep -f "log-server.js" >/dev/null; then
-        echo -e "🌐 Log server: \033[1;32m✅ Running (port 3333)\033[0m"
+    # Check log server status
+    if [ -f ".devlogger/log-server.pid" ]; then
+        local log_pid=$(cat .devlogger/log-server.pid 2>/dev/null)
+        if [ -n "$log_pid" ] && kill -0 "$log_pid" 2>/dev/null; then
+            echo -e "🌐 Log server: \033[1;32m✅ Running (port 3333, PID: $log_pid)\033[0m"
+        else
+            echo -e "🌐 Log server: \033[1;31m❌ Stopped (stale PID file)\033[0m"
+            rm -f .devlogger/log-server.pid
+        fi
+    elif pgrep -f "log-server.js" >/dev/null; then
+        local log_pid=$(pgrep -f "log-server.js")
+        echo -e "🌐 Log server: \033[1;33m⚠️  Running (port 3333, PID: $log_pid, no PID file)\033[0m"
     else
         echo -e "🌐 Log server: \033[1;31m❌ Stopped\033[0m"
     fi
     
-    if pgrep -f "proxy.js" >/dev/null; then
+    # Check proxy server status
+    if [ -f ".devlogger/proxy.pid" ]; then
+        local proxy_pid=$(cat .devlogger/proxy.pid 2>/dev/null)
+        if [ -n "$proxy_pid" ] && kill -0 "$proxy_pid" 2>/dev/null; then
+            echo -e "🔄 Proxy server: \033[1;32m✅ Running (port 3334, PID: $proxy_pid)\033[0m"
+        else
+            echo -e "🔄 Proxy server: \033[1;31m❌ Stopped (stale PID file)\033[0m"
+            rm -f .devlogger/proxy.pid
+        fi
+    elif pgrep -f "proxy.js" >/dev/null; then
         local proxy_pid=$(pgrep -f "proxy.js")
-        echo -e "🔄 Proxy server: \033[1;32m✅ Running (port 3334)\033[0m"
+        echo -e "🔄 Proxy server: \033[1;33m⚠️  Running (port 3334, PID: $proxy_pid, no PID file)\033[0m"
     else
         echo -e "🔄 Proxy server: \033[1;31m❌ Stopped\033[0m"
     fi
@@ -763,7 +895,9 @@ show_status() {
     # Show current dev servers
     echo ""
     echo -e "\033[1;36m🔍 Running dev servers:\033[0m"
-    find_running_dev_server >/dev/null 2>&1 || echo -e "   \033[1;33mNone detected\033[0m"
+    if ! find_running_dev_server 2>/dev/null; then
+        echo -e "   \033[1;33mNone detected\033[0m"
+    fi
     
     if [ -f ".devlogger/browser.log" ]; then
         local log_count=$(wc -l < .devlogger/browser.log 2>/dev/null || echo 0)
@@ -773,9 +907,54 @@ show_status() {
 
 stop_services() {
     echo "🛑 Stopping see-me services..."
-    pkill -f "log-server.js" 2>/dev/null || true
-    pkill -f "proxy.js" 2>/dev/null || true
-    echo "✅ Services stopped"
+    
+    # Stop services using stored PIDs
+    local stopped_count=0
+    
+    if [ -f ".devlogger/log-server.pid" ]; then
+        local log_pid=$(cat .devlogger/log-server.pid 2>/dev/null)
+        if [ -n "$log_pid" ] && kill -0 "$log_pid" 2>/dev/null; then
+            if kill "$log_pid" 2>/dev/null; then
+                echo "   ✅ Log server stopped (PID: $log_pid)"
+                stopped_count=$((stopped_count + 1))
+            else
+                echo "   ⚠️  Log server PID $log_pid could not be killed"
+            fi
+        fi
+        rm -f .devlogger/log-server.pid
+    fi
+    
+    if [ -f ".devlogger/proxy.pid" ]; then
+        local proxy_pid=$(cat .devlogger/proxy.pid 2>/dev/null)
+        if [ -n "$proxy_pid" ] && kill -0 "$proxy_pid" 2>/dev/null; then
+            if kill "$proxy_pid" 2>/dev/null; then
+                echo "   ✅ Proxy server stopped (PID: $proxy_pid)"
+                stopped_count=$((stopped_count + 1))
+            else
+                echo "   ⚠️  Proxy server PID $proxy_pid could not be killed"
+            fi
+        fi
+        rm -f .devlogger/proxy.pid
+    fi
+    
+    # Fallback: use pattern matching if PID files didn't work
+    if [ $stopped_count -eq 0 ]; then
+        echo "   🔍 No PID files found, using pattern matching..."
+        if pkill -f "log-server.js" 2>/dev/null; then
+            echo "   ✅ Log server stopped (pattern match)"
+            stopped_count=$((stopped_count + 1))
+        fi
+        if pkill -f "proxy.js" 2>/dev/null; then
+            echo "   ✅ Proxy server stopped (pattern match)"
+            stopped_count=$((stopped_count + 1))
+        fi
+    fi
+    
+    if [ $stopped_count -gt 0 ]; then
+        echo "✅ Services stopped ($stopped_count processes)"
+    else
+        echo "✅ No running services found"
+    fi
 }
 
 show_version() {
