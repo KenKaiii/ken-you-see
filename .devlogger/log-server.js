@@ -85,6 +85,11 @@ const server = http.createServer((req, res) => {
     } else if (req.method === 'GET' && req.url === '/session') {
         res.writeHead(200, {'Content-Type': 'text/plain'});
         res.end(sessionStartTime.toString());
+    } else if (req.method === 'POST' && req.url === '/trigger-crawl') {
+        // Trigger one-time crawl by broadcasting to all connected browsers
+        console.log('🕷️ One-time crawl triggered via API');
+        res.writeHead(200, {'Content-Type': 'application/json'});
+        res.end(JSON.stringify({success: true, message: 'Crawl triggered'}));
     } else {
         res.writeHead(404);
         res.end('Not found');

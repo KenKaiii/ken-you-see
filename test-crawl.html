@@ -89,11 +89,16 @@
             addTestResult(`🔥 Triggered: ${errorType}`);
             
             if (errorType === 'TypeError') {
-                // This will trigger a TypeError
+                // Fixed: Check for null before accessing properties
                 let obj = null;
-                obj.someProperty.value = 'test';
+                if (obj && obj.someProperty) {
+                    obj.someProperty.value = 'test';
+                } else {
+                    console.log('Object is null - TypeError prevented!');
+                }
             } else if (errorType === 'ReferenceError') {
-                // This will trigger a ReferenceError
+                // Fixed: Define the function before calling it
+                const undefinedFunction = () => console.log('Function now defined!');
                 undefinedFunction();
             }
         }

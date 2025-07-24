@@ -90,12 +90,23 @@
         addLog('error', [`Unhandled Promise Rejection: ${e.reason}`]);
     });
     
-    // Auto-crawler for comprehensive error discovery
-    if (window.location.search.includes('crawl=true')) {
-        setTimeout(() => {
-            startAutoCrawler();
-        }, 2000); // Wait for page to stabilize
-    }
+    // Poll for one-time crawl triggers from agent
+    let lastCrawlCheck = 0;
+    setInterval(() => {
+        fetch('http://localhost:3333/session')
+            .then(response => response.text())
+            .then(sessionId => {
+                // If session changed, it means crawl was triggered
+                if (sessionId !== currentSessionId && sessionId > lastCrawlCheck) {
+                    lastCrawlCheck = Date.now();
+                    originalConsole.log('🕷️ One-time crawl triggered by agent');
+                    setTimeout(() => {
+                        startAutoCrawler();
+                    }, 1000); // Brief delay for page stability
+                }
+            })
+            .catch(() => {}); // Ignore network errors
+    }, 2000); // Check every 2 seconds
     
     function startAutoCrawler() {
         const visitedElements = new Set();
