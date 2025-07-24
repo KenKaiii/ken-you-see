@@ -586,23 +586,44 @@ detect_newly_started_server() {
         done <<< "$node_servers"
     fi
     
-    # Fallback: look for any node process on common dev ports
-    local common_ports=(3000 5173 8080 8000 3001 4000 5500)
+    # Look for Go dev servers (go run, compiled binaries)
+    local go_servers=$(ps -eo pid,args | grep -E "(go.*run.*\.go|\.\/[a-zA-Z0-9_-]+$|\.\/main$)" | grep -v grep)
+    
+    if [ -n "$go_servers" ]; then
+        while IFS= read -r server_line; do
+            local pid=$(echo "$server_line" | awk '{print $1}')
+            local listening_ports=$(lsof -Pan -p "$pid" -i 2>/dev/null | grep LISTEN | awk -F: '{print $2}' | awk '{print $1}' | sort -u)
+            
+            if [ -n "$listening_ports" ]; then
+                for port in $listening_ports; do
+                    if lsof -i :$port >/dev/null 2>&1; then
+                        local process_name=$(ps -p "$pid" -o comm= 2>/dev/null || echo "go")
+                        echo "   ✅ Found $process_name server on port $port (PID: $pid)" >&2
+                        echo "$port"
+                        return 0
+                    fi
+                done
+            fi
+        done <<< "$go_servers"
+    fi
+    
+    # Fallback: look for any node or go process on common dev ports
+    local common_ports=(3000 5173 8080 8000 3001 4000 5500 9000)
     for port in "${common_ports[@]}"; do
         if lsof -i :$port >/dev/null 2>&1; then
             local process_info=$(lsof -i :$port | tail -1)
             local process_name=$(echo "$process_info" | awk '{print $1}')
             
-            if [ "$process_name" = "node" ]; then
+            if [ "$process_name" = "node" ] || [ "$process_name" = "go" ] || [ "$process_name" = "main" ]; then
                 local pid=$(echo "$process_info" | awk '{print $2}')
-                echo "   ✅ Found node server on port $port (PID: $pid)" >&2
+                echo "   ✅ Found $process_name server on port $port (PID: $pid)" >&2
                 echo "$port"
                 return 0
             fi
         fi
     done
     
-    echo "   ❌ No Node.js dev server detected" >&2
+    echo "   ❌ No Node.js or Go dev server detected" >&2
     return 1
 }
 
