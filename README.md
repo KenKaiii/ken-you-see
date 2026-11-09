@@ -11,6 +11,9 @@
     No copy/paste needed - agents see everything automatically
 ```
 
+> [!TIP]
+> **Want to build your own apps with AI?** A free 7-day build challenge and 20+ step-by-step projects are in my free community: **[skool.com/raid](https://www.skool.com/raid)**
+
 ## 🚀 Super Quick Setup
 
 ### Step 1: Install
